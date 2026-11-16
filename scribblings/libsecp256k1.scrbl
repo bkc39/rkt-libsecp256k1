@@ -1,7 +1,56 @@
 #lang scribble/manual
 @require[@for-label[libsecp256k1 racket/base racket/contract file/sha1]
+         (for-syntax racket/base
+                     racket/string
+                     syntax/parse
+                     syntax/strip-context
+                     "recorded.rkt")
+         libsecp256k1
          scribble/example]
+
 @(define secp-eval (make-base-eval '(require libsecp256k1 file/sha1)))
+
+@(define live?
+   (with-handlers ([exn:fail:libsecp256k1:load? (lambda (_) #f)])
+     (and (libsecp256k1-origin) #t)))
+
+@(begin-for-syntax
+   (define-syntax-class printed
+     #:description "a printed result: a string, or a list of strings to join"
+     (pattern text:str)
+     (pattern (part:str ...)
+              #:with text (datum->syntax #'(part ...)
+                                         (string-append* (map syntax-e
+                                                              (syntax->list #'(part ...)))))))
+
+   (define-syntax-class recorded-row
+     #:description "a recorded example: [form], [form printed] or [form (error message)]"
+     #:datum-literals (error)
+     (pattern [form]
+              #:with live #'form
+              #:with recorded #'(eval:alts form (eval:results null)))
+     (pattern [form (error message:str)]
+              #:with live #'(eval:error form)
+              #:with recorded #'(eval:alts form (eval:result "" "" message)))
+     (pattern [form result:printed]
+              #:with live #'form
+              #:with recorded #'(eval:alts form (eval:result (racketresultfont result.text))))))
+
+@(define-syntax (recorded-examples stx)
+   (syntax-parse stx
+     [(_ key:id)
+      (syntax-parse (replace-context stx manual-examples)
+        [((name:id row:recorded-row ...) ...)
+         (define rows
+           (for/first ([name (in-list (syntax->list #'(name ...)))]
+                       [rows (in-list (syntax->list #'((row ...) ...)))]
+                       #:when (eq? (syntax-e name) (syntax-e #'key)))
+             rows))
+         (syntax-parse rows
+           [(row:recorded-row ...)
+            #'(if live?
+                  (examples #:eval secp-eval row.live ...)
+                  (examples #:eval secp-eval row.recorded ...))])])]))
 
 @title{libsecp256k1: secp256k1 Keys and ECDSA Signatures}
 @author{bkc}
@@ -11,6 +60,13 @@ FFI bindings to Bitcoin Core's
 @hyperlink["https://github.com/bitcoin-core/secp256k1"]{libsecp256k1} C library: secret
 and public keys on the secp256k1 curve, deterministic ECDSA signatures, public key
 recovery and key tweaks.  This is not the pure-Racket @tt{secp256k1} package.
+
+@bold{Security.} A secret key prints as @litchar{#<secret-key>}.  No error from this
+library shows an argument: a contract violation, a wrong argument count or an unknown
+keyword names what was expected and the kind and length of what was given, never the value.
+The named contracts keep that guarantee only inside this library; @racket[secret-bytes/c]
+in a caller's own @racket[->] contract prints the value like any other contract.  Racket's
+memory manager may copy key bytes, so this library cannot erase them from memory.
 
 @bold{License.} This package is distributed under @bold{Apache-2.0 OR MIT}; the bundled
 libsecp256k1 source is distributed under @bold{MIT}.
@@ -25,23 +81,22 @@ tools.
 @section{Secret Keys}
 
 @defproc[(secret-key? [v any/c]) boolean?]{
-Recognizes secret keys.}
+Recognizes secret keys.  Secret keys are @racket[equal?] only when they are @racket[eq?];
+compare their bytes or integers instead.}
 
 @defproc[(generate-secret-key) secret-key?]{
 A fresh key from the operating system's random source.}
 
-@defproc[(bytes->secret-key [bs secret-bytes/c]) secret-key?]{
-The key whose big-endian value is @racket[bs].  Raises @racket[exn:fail:libsecp256k1:key]
-when the value is zero or not less than @racket[secp256k1-order].  A secret key prints as
-@litchar{#<secret-key>}, and errors never show it or the bytes it came from.
+@deftogether[(@defproc[(integer->secret-key [k exact-integer?]) secret-key?]
+              @defproc[(bytes->secret-key [bs secret-bytes/c]) secret-key?])]{
+The key @racket[k], or the key whose big-endian value is @racket[bs].  Raise
+@racket[exn:fail:libsecp256k1:key] when the value is not in [1, @italic{n}).
 
-@examples[#:eval secp-eval
-  (define one (bytes->secret-key (bytes-append (make-bytes 31 0) #"\1")))
-  one
-  (eval:error (bytes->secret-key (make-bytes 32 0)))]}
+@recorded-examples[secret-keys]}
 
-@defproc[(secret-key->bytes [key secret-key/c]) bytes?]{
-A fresh, mutable 32-byte copy.}
+@deftogether[(@defproc[(secret-key->integer [key secret-key/c]) exact-positive-integer?]
+              @defproc[(secret-key->bytes [key secret-key/c]) secret-bytes/c])]{
+The key's value, and a fresh, mutable 32-byte big-endian copy of it.}
 
 @defproc[(secret-key->public-key [key secret-key/c]) public-key?]{
 The public key @italic{kG}.}
@@ -51,11 +106,7 @@ The key @italic{n − k}.}
 
 @deftogether[(@defthing[secret-bytes/c flat-contract?]
               @defthing[secret-key/c flat-contract?])]{
-32 bytes, and secret keys.  A violation names the kind and length of the value it was given,
-never the value.}
-
-Keys are never printed.  Racket's memory manager may copy key bytes, so this library cannot
-erase them from memory.
+32 bytes, and secret keys.}
 
 @section{Public Keys}
 
@@ -67,14 +118,11 @@ Parses the compressed form (33 bytes, prefix @tt{02} or @tt{03}) or the uncompre
 (65 bytes, prefix @tt{04}).  Raises @racket[exn:fail:libsecp256k1:key] for any other prefix
 or for bytes that are not a point on the curve.}
 
-@defproc[(public-key->bytes [key public-key?] [#:compressed? compressed? any/c #t]) bytes?]{
+@defproc[(public-key->bytes [key public-key?] [#:compressed? compressed? any/c #t])
+         public-key-bytes/c]{
 The compressed or uncompressed form.
 
-@examples[#:eval secp-eval
-  (define pk (secret-key->public-key one))
-  pk
-  (bytes->hex-string (public-key->bytes pk #:compressed? #f))
-  (equal? pk (bytes->public-key (public-key->bytes pk #:compressed? #f)))]}
+@recorded-examples[public-keys]}
 
 @defproc[(public-key-negate [key public-key?]) public-key?]{
 The point @italic{−P}.}
@@ -87,16 +135,16 @@ The sum.  Raises @racket[exn:fail:libsecp256k1:key] when it is the point at infi
 
 @section{ECDSA Signatures}
 
-Arguments come in the C library's order: the digest before the key, and the signature first.
+Arguments keep the C library's order: the thing being signed or checked comes before the
+key.
 
 @defthing[secp256k1-order exact-positive-integer?]{
 The curve order @italic{n}.}
 
 @deftogether[(@defthing[digest/c flat-contract?]
               @defthing[scalar/c flat-contract?]
-              @defthing[recovery-id/c flat-contract?]
-              @defthing[compact-bytes/c flat-contract?])]{
-32 bytes; an integer in [0, @italic{n}); an integer in [0, 3]; 64 bytes.}
+              @defthing[recovery-id/c flat-contract?])]{
+32 bytes; an integer in [0, @italic{n}); an integer in [0, 3].}
 
 @deftogether[(@defproc[(ecdsa-signature [r scalar/c] [s scalar/c]) ecdsa-signature?]
               @defproc[(ecdsa-signature? [v any/c]) boolean?]
@@ -110,11 +158,7 @@ Signs a 32-byte digest.  The caller hashes the message.  The nonce comes from RF
 the same key and digest always give the same signature, and @racket[s] is always in the lower
 half of the order.
 
-@examples[#:eval secp-eval
-  (define digest (sha256-bytes #"Satoshi Nakamoto"))
-  (define sig (ecdsa-sign digest one))
-  sig
-  (ecdsa-verify sig digest pk)]}
+@recorded-examples[signing]}
 
 @defproc[(ecdsa-verify [sig ecdsa-signature?] [digest digest/c] [key public-key?]) boolean?]{
 Rejects signatures whose @racket[s] is in the upper half of the order.  Use
@@ -126,11 +170,7 @@ Whether @racket[s] is in the lower half of the order, and the signature with @it
 in place of a high @racket[s].  Normalizing keeps the kind; a recoverable signature's
 recovery id changes with @racket[s], so recovery gives the same key.
 
-@examples[#:eval secp-eval
-  (define high (ecdsa-signature (ecdsa-signature-r sig)
-                                (- secp256k1-order (ecdsa-signature-s sig))))
-  (ecdsa-verify high digest pk)
-  (equal? (ecdsa-signature-normalize high) sig)]}
+@recorded-examples[normalizing]}
 
 @subsection{Encodings}
 
@@ -138,17 +178,19 @@ Compact is @italic{r ‖ s} as 32-byte big-endian integers; DER is strict.  Pars
 @racket[exn:fail:libsecp256k1:signature].
 
 @deftogether[(@defproc[(ecdsa-signature->compact [sig ecdsa-signature?]) compact-bytes/c]
-              @defproc[(compact->ecdsa-signature
-                        [bs compact-bytes/c]
-                        [#:recovery-id id (or/c #f recovery-id/c) #f])
-                       ecdsa-signature?])]{
-With @racket[id], the result is an @racket[ecdsa-recoverable-signature?].}
+              @defproc[(compact->ecdsa-signature [bs compact-bytes/c]) ecdsa-signature?]
+              @defproc[(compact->ecdsa-recoverable-signature [bs compact-bytes/c]
+                                                             [id recovery-id/c])
+                       ecdsa-recoverable-signature?])]{
+A recoverable signature's compact form leaves out its recovery id.}
 
-@deftogether[(@defproc[(ecdsa-signature->der [sig ecdsa-signature?]) bytes?]
+@deftogether[(@defproc[(ecdsa-signature->der [sig ecdsa-signature?]) der-bytes/c]
               @defproc[(der->ecdsa-signature [bs bytes?]) ecdsa-signature?])]{
-@examples[#:eval secp-eval
-  (bytes->hex-string (ecdsa-signature->der sig))
-  (equal? (der->ecdsa-signature (ecdsa-signature->der sig)) sig)]}
+@recorded-examples[der]}
+
+@deftogether[(@defthing[compact-bytes/c flat-contract?]
+              @defthing[der-bytes/c flat-contract?])]{
+64 bytes; at most 72 bytes.}
 
 @subsection{Public Key Recovery}
 
@@ -156,8 +198,7 @@ With @racket[id], the result is an @racket[ecdsa-recoverable-signature?].}
                                                     [id recovery-id/c])
                        ecdsa-recoverable-signature?]
               @defproc[(ecdsa-recoverable-signature? [v any/c]) boolean?]
-              @defproc[(ecdsa-recoverable-signature-recovery-id
-                        [sig ecdsa-recoverable-signature?])
+              @defproc[(ecdsa-recoverable-signature-id [sig ecdsa-recoverable-signature?])
                        recovery-id/c])]{
 A signature together with the recovery id that selects its signer among up to four
 candidates.  It is also an @racket[ecdsa-signature?].}
@@ -170,10 +211,7 @@ Signs as @racket[ecdsa-sign] does, with the same @racket[r] and @racket[s].}
          (or/c public-key? #f)]{
 @racket[#f] when no public key recovers.
 
-@examples[#:eval secp-eval
-  (define rsig (ecdsa-sign-recoverable digest one))
-  (ecdsa-recoverable-signature-recovery-id rsig)
-  (equal? (ecdsa-recover rsig digest) pk)]}
+@recorded-examples[recovery]}
 
 @section{Tweaks}
 
@@ -185,10 +223,7 @@ Add @racket[tweak], read as a big-endian integer, to the key: @italic{k + t} and
 @italic{P + tG} respectively.  Raise @racket[exn:fail:libsecp256k1:key] when the tweak is not
 less than the order or the result is zero or the point at infinity.
 
-@examples[#:eval secp-eval
-  (define t (bytes-append (make-bytes 31 0) #"\1"))
-  (secret-key->public-key (secret-key-tweak-add one t))
-  (equal? (public-key-tweak-add pk t) (secret-key->public-key (secret-key-tweak-add one t)))]}
+@recorded-examples[tweaks]}
 
 @section{Errors}
 
@@ -198,7 +233,8 @@ Contract violations are ordinary @racket[exn:fail:contract:blame] errors.
 The parent of this library's exceptions.}
 
 @defstruct*[(exn:fail:libsecp256k1:load exn:fail:libsecp256k1) ()]{
-Raised by every procedure that needs the C library when no usable library was found.}
+Raised by every procedure that needs the C library when no usable library was found.  The
+message gives each candidate's reason and what to do.}
 
 @defstruct*[(exn:fail:libsecp256k1:key exn:fail:libsecp256k1) ()]{
 Raised for an invalid secret or public key, tweak or sum.}
@@ -220,8 +256,11 @@ Which libsecp256k1 is in use.  @racket['bundled] means the copy compiled when th
 installed; @racket['system] means the operating system's @tt{libsecp256k1} (0.2 or later, with
 the recovery module), used when the package could not compile its own; @racket['environment]
 means the file named by the @tt{LIBSECP256K1_LIBRARY} environment variable.  If that variable
-is @tt{system}, only the system library is used.  Raises
+is @tt{system}, only the system library is used.  The system library is found by the operating
+system's loader in its own directories, never in the current directory.  Raises
 @racket[exn:fail:libsecp256k1:load] when none can be loaded; every other procedure that needs
 the C library raises it too.}
 
-Every procedure may be called from any thread or place.
+Every procedure may be called from any thread or place.  Each call into the C library is
+atomic: no other Racket thread in the place runs until it returns, so a long batch of calls
+lets other threads run only between calls.

@@ -7,8 +7,8 @@
            rackunit
            libsecp256k1
            (only-in libsecp256k1/private/ffi secp256k1_ecdsa_signature_parse_der)
-           "util.rkt"
-           "vectors.rkt")
+           "helpers/util.rkt"
+           "helpers/vectors.rkt")
 
   (define (random-pair rng)
     (values (bytes->secret-key (random-secret-bytes rng)) (random-digest rng)))
@@ -72,14 +72,14 @@
       (define rsig (ecdsa-sign-recoverable digest key))
       (define r (ecdsa-signature-r rsig))
       (define s (ecdsa-signature-s rsig))
-      (define id (ecdsa-recoverable-signature-recovery-id rsig))
+      (define id (ecdsa-recoverable-signature-id rsig))
       (define high (ecdsa-recoverable-signature r (- n s) (bitwise-xor id 1)))
       (for ([sig (list rsig high (ecdsa-signature r s) (ecdsa-signature r (- n s)))])
         (define once (ecdsa-signature-normalize sig))
         (check-equal? (ecdsa-signature-normalize once) once)
         (check-equal? (ecdsa-recoverable-signature? once) (ecdsa-recoverable-signature? sig)))
       (define normalized (ecdsa-signature-normalize high))
-      (check-equal? (ecdsa-recoverable-signature-recovery-id normalized) id)
+      (check-equal? (ecdsa-recoverable-signature-id normalized) id)
       (check-equal? (ecdsa-signature-normalize rsig) rsig)
       (check-equal? (ecdsa-recover normalized digest) (ecdsa-recover high digest))
       (check-equal? (ecdsa-recover high digest) (secret-key->public-key key))))
@@ -94,9 +94,9 @@
       (check-equal? compact (bytes-append (integer->bytes32 (ecdsa-signature-r sig))
                                           (integer->bytes32 (ecdsa-signature-s sig))))
       (check-equal? (compact->ecdsa-signature compact) sig)
-      (check-equal? (compact->ecdsa-signature
+      (check-equal? (compact->ecdsa-recoverable-signature
                      (ecdsa-signature->compact rsig)
-                     #:recovery-id (ecdsa-recoverable-signature-recovery-id rsig))
+                     (ecdsa-recoverable-signature-id rsig))
                     rsig)
       (define r (random-bytes rng 32))
       (define s (random-bytes rng 32))
@@ -111,16 +111,19 @@
                     (bytes-append (make-bytes 32 0) (integer->bytes32 (- n 1)))
                     (bytes-append (integer->bytes32 (- n 1)) (make-bytes 32 0)))])
       (check-equal? (ecdsa-signature->compact (compact->ecdsa-signature bs)) bs)
-      (check-equal? (ecdsa-signature->compact (compact->ecdsa-signature bs #:recovery-id 3)) bs))
+      (check-equal? (ecdsa-signature->compact (compact->ecdsa-recoverable-signature bs 3)) bs))
     (for ([bs (list (bytes-append (integer->bytes32 n) (integer->bytes32 1))
                     (bytes-append (integer->bytes32 1) (integer->bytes32 n))
                     (make-bytes 64 255))]
           #:when #t
           [id (list #f 0 3)])
-      (check-exn (regexp (regexp-quote (string-append
-                                        "compact->ecdsa-signature: invalid signature;\n"
-                                        " r or s is not less than the curve order")))
-                 (lambda () (compact->ecdsa-signature bs #:recovery-id id)))))
+      (check-exn (pregexp (string-append "^compact->ecdsa-(recoverable-)?signature: invalid"
+                                         " signature;\n r or s is not less than the curve"
+                                         " order$"))
+                 (lambda ()
+                   (if id
+                       (compact->ecdsa-recoverable-signature bs id)
+                       (compact->ecdsa-signature bs))))))
 
   (define (check-der-law bs)
     (define sig
@@ -180,7 +183,7 @@
     (check-equal? (format "~a" (ecdsa-signature 1 2))
                   (string-append "#<ecdsa-signature " (hex compact) ">"))
     (check-equal? (format "~s" (ecdsa-recoverable-signature 1 2 3))
-                  (string-append "#<ecdsa-recoverable-signature " (hex compact) " 3>")))
+                  (string-append "#<ecdsa-recoverable-signature " (hex compact) " id=3>")))
 
   (define (x-coordinate-mod-n nonce)
     (define pk (secret-key->public-key (bytes->secret-key nonce)))
@@ -203,7 +206,7 @@
       (define rsig (ecdsa-sign-recoverable digest key))
       (with-check-info (['row i])
         (check-equal? (ecdsa-signature->compact rsig) (signing-row-compact row))
-        (check-equal? (ecdsa-recoverable-signature-recovery-id rsig) (signing-row-recovery-id row))
+        (check-equal? (ecdsa-recoverable-signature-id rsig) (signing-row-recovery-id row))
         (check-equal? (ecdsa-signature->compact (ecdsa-sign digest key)) (signing-row-compact row))
         (check-equal? (ecdsa-recover rsig digest) (secret-key->public-key key)))))
 
@@ -224,7 +227,7 @@
         (if sig 0 1)))
     (define upstream-unparsed
       (for/sum ([row (in-list rows)])
-        (if (secp256k1_ecdsa_signature_parse_der (wycheproof-row-der row)) 0 1)))
+        (if (secp256k1_ecdsa_signature_parse_der 'test (wycheproof-row-der row)) 0 1)))
     (check-equal? upstream-unparsed 190)
     (check-equal? unparsed 274))
 
@@ -245,7 +248,7 @@
       [(struct* tiny-invalid-row ([section 'recover] [digest digest] [compact compact]
                                                      [recovery-id id]))
        (attempt (lambda ()
-                  (ecdsa-recover (compact->ecdsa-signature compact #:recovery-id (or id 0))
+                  (ecdsa-recover (compact->ecdsa-recoverable-signature compact (or id 0))
                                  digest)))]))
 
   (define (expected-tiny-outcome row)

@@ -1,8 +1,5 @@
 #lang racket/base
 
-;; The module graph of a library, by name, for tests that bound what a
-;; module may depend on.
-
 (require racket/match
          setup/collects)
 
@@ -36,7 +33,6 @@
        (loop rest (cons self seen))]
       [(cons self rest) (loop (append (direct-imports self) rest) (cons self seen))])))
 
-;; "racket/list" for a collection module, #f for a primitive one.
 (define (module-name r)
   (match (resolved-module-path-name r)
     [(or (? path? p) (cons (? path? p) _))

@@ -5,6 +5,9 @@ rfc6979-nonces.rktd
   crypto/tests/test_check.c at commit e22d597d27b3f57297d7a3d36a3b97b4ca5c09b1,
   https://github.com/trezor/trezor-firmware/blob/e22d597d27b3f57297d7a3d36a3b97b4ca5c09b1/crypto/tests/test_check.c
   Rows 1 and 2 are RFC 6979 A.2.5's key with "sample".
+  Extracted by hand: for each of the seven cases, the private key, the
+  message and the expected nonce as test_rfc6979 gives them, written as one
+  (nonce-row secret message nonce) form per case in file order.
   Licence: MIT (trezor-crypto), trezor-crypto/LICENSE.
   Read by tests/ecdsa.rkt and tests/load.rkt.
 

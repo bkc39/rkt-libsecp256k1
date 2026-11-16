@@ -7,7 +7,6 @@ on:
 
 jobs:
   racket:
-    # What the package catalog's build server does, plus the cast differential.
     name: Racket ${{ matrix.racket-version }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.experimental }}
@@ -15,14 +14,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        # 8.8 is the floor declared in info.rkt.
         racket-version: ["8.8", "stable"]
         experimental: [false]
         include:
           - os: ubuntu-latest
             racket-version: current
             experimental: true
-          # The native build differs on macOS (clang, dylib).
           - os: macos-latest
             racket-version: stable
             experimental: false
@@ -35,7 +32,8 @@ jobs:
           variant: CS
           version: ${{ matrix.racket-version }}
       - uses: foundry-rs/foundry-toolchain@v1.9.1
-      # A full setup, as for users: the pre-installer compiles the bundled C library.
+      - name: Enable the cast differential
+        run: echo "LIBSECP256K1_CAST=$(command -v cast)" >> "$GITHUB_ENV"
       - name: Install libsecp256k1
         run: raco pkg install --batch --auto --link --name libsecp256k1 "$GITHUB_WORKSPACE"
       - name: The bundled library is the one loaded
@@ -45,13 +43,17 @@ jobs:
       - name: Check dependencies (with docs)
         run: raco setup --check-pkg-deps --unused-pkg-deps --pkgs libsecp256k1
       - name: Test
-        run: raco test -x --timeout 120 -p libsecp256k1
+        run: raco test -x --timeout 120 -p libsecp256k1 2>&1 | tee test.log
+        shell: bash -o pipefail {0}
+      - name: Skipped tests
+        if: always()
+        run: grep '^SKIPPED' test.log || echo "none"
 
   nix:
-    name: nix build
+    name: nix flake check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: cachix/install-nix-action@v31
-      - name: Hermetic build and tests (bundled and system library)
-        run: nix build -L
+      - name: Hermetic build and tests, with the system library and the cast differential
+        run: nix flake check -L

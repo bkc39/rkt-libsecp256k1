@@ -4,7 +4,7 @@
   (require racket/list
            rackunit
            libsecp256k1
-           "util.rkt")
+           "helpers/util.rkt")
 
   (define (random-pair rng)
     (values (bytes->secret-key (random-secret-bytes rng)) (random-digest rng)))
@@ -34,7 +34,7 @@
     (define ids
       (for/list ([_ (in-range 500)])
         (define-values (key digest) (random-pair rng))
-        (ecdsa-recoverable-signature-recovery-id (ecdsa-sign-recoverable digest key))))
+        (ecdsa-recoverable-signature-id (ecdsa-sign-recoverable digest key))))
     (check-equal? (sort (remove-duplicates ids) <) '(0 1)))
 
   (test-case "an r that is no x-coordinate recovers nothing"

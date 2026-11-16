@@ -5,16 +5,16 @@
            racket/match
            rackunit
            libsecp256k1
-           "bounded.rkt"
-           "util.rkt"
-           "vectors.rkt")
+           "helpers/bounded.rkt"
+           "helpers/util.rkt"
+           "helpers/vectors.rkt")
 
   (define batch-size 1000)
 
-  ;; Runs (check-input input) on every input in bounded batches; the only
-  ;; exception allowed out of check-input is `allowed?`.
+  (struct tally (accepted refused) #:transparent)
+
   (define (fuzz inputs allowed? check-input)
-    (for ([batch (in-slice batch-size inputs)])
+    (for/fold ([total (tally 0 0)]) ([batch (in-slice batch-size inputs)])
       (define outcome
         (call-bounded
          (lambda ()
@@ -23,9 +23,17 @@
                (check-input input))))
          #:seconds 2 #:megabytes 64))
       (match outcome
-        [(list 'ok results) (check-equal? (length results) (length batch))]
-        [(list 'raised e) (fail (format "raised ~a" (exn-message e)))]
-        [other (fail (format "~a" other))])))
+        [(list 'ok results)
+         (define refused (count (lambda (r) (eq? r 'refused)) results))
+         (tally (+ (tally-accepted total) (- (length results) refused))
+                (+ (tally-refused total) refused))]
+        [(list 'raised e) (fail (format "raised ~a" (exn-message e))) total]
+        [other (fail (format "~a" other)) total])))
+
+  (define (check-both-outcomes t)
+    (with-check-info (['tally t])
+      (check-true (positive? (tally-accepted t)))
+      (check-true (positive? (tally-refused t)))))
 
   (define (in-slice size xs)
     (let loop ([xs xs] [acc '()])
@@ -65,19 +73,26 @@
                 (random-bytes rng (random 101 rng)))
               (for/list ([_ (in-range 10000)])
                 (mutate rng (list-ref seeds (random (length seeds) rng))))))
-    (fuzz inputs exn:fail:libsecp256k1:signature? check-der))
+    (check-both-outcomes (fuzz inputs exn:fail:libsecp256k1:signature? check-der)))
 
   (test-seeded "public key parsing round-trips or raises :key" #:seed (261 262 263 264 265 266) rng
+    (define (serialized i)
+      (public-key->bytes (secret-key->public-key (bytes->secret-key (random-secret-bytes rng)))
+                         #:compressed? (even? i)))
     (define inputs
       (for/list ([i (in-range 10000)])
-        (define bs (random-bytes rng (if (even? i) 33 65)))
-        (bytes-set! bs 0 (modulo i 256))
+        (define bs (if (zero? (modulo i 4))
+                       (serialized i)
+                       (random-bytes rng (if (even? i) 33 65))))
+        (unless (zero? (modulo i 8))
+          (bytes-set! bs 0 (modulo i 256)))
         bs))
-    (fuzz inputs exn:fail:libsecp256k1:key?
-          (lambda (bs)
-            (define pk (bytes->public-key bs))
-            (unless (equal? (public-key->bytes pk #:compressed? (= (bytes-length bs) 33)) bs)
-              (error 'check-public-key "does not round-trip: ~a" (hex bs))))))
+    (check-both-outcomes
+     (fuzz inputs exn:fail:libsecp256k1:key?
+           (lambda (bs)
+             (define pk (bytes->public-key bs))
+             (unless (equal? (public-key->bytes pk #:compressed? (= (bytes-length bs) 33)) bs)
+               (error 'check-public-key "does not round-trip: ~a" (hex bs)))))))
 
   (test-seeded "compact parsing gives a signature or raises :signature"
     #:seed (271 272 273 274 275 276) rng
@@ -85,11 +100,14 @@
       (for/list ([_ (in-range 10000)])
         (define bs (random-bytes rng 64))
         (when (zero? (random 2 rng))
-          (bytes-copy! bs 0 (make-bytes (random 4 rng) 255)))
+          (bytes-copy! bs (* 32 (random 2 rng)) (make-bytes 16 255)))
         (cons bs (list-ref '(#f 0 1 2 3) (random 5 rng)))))
-    (fuzz inputs exn:fail:libsecp256k1:signature?
-          (lambda (input)
-            (compact->ecdsa-signature (car input) #:recovery-id (cdr input)))))
+    (check-both-outcomes
+     (fuzz inputs exn:fail:libsecp256k1:signature?
+           (lambda (input)
+             (if (cdr input)
+                 (compact->ecdsa-recoverable-signature (car input) (cdr input))
+                 (compact->ecdsa-signature (car input)))))))
 
   (test-seeded "verify and recover never raise on random triples" #:seed (281 282 283 284 285 286)
     rng
@@ -103,12 +121,15 @@
               (random 4 rng)
               (random-digest rng)
               (list-ref keys (random 20 rng)))))
-    (fuzz inputs (lambda (_) #f)
-          (match-lambda
-            [(list r s id digest key)
-             (define sig (ecdsa-recoverable-signature r s id))
-             (unless (boolean? (ecdsa-verify sig digest key))
-               (error 'verify "not a boolean"))
-             (define recovered (ecdsa-recover sig digest))
-             (unless (or (not recovered) (public-key? recovered))
-               (error 'recover "not a key or #f"))]))))
+    (check-both-outcomes
+     (fuzz inputs (lambda (_) #f)
+           (match-lambda
+             [(list r s id digest key)
+              (define sig (ecdsa-recoverable-signature r s id))
+              (unless (boolean? (ecdsa-verify sig digest key))
+                (error 'verify "not a boolean"))
+              (define recovered (ecdsa-recover sig digest))
+              (cond
+                [(public-key? recovered) recovered]
+                [(not recovered) 'refused]
+                [else (error 'recover "not a key or #f")])])))))

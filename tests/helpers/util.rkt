@@ -49,11 +49,9 @@
     [(even? e) (modulo (let ([h (modular-expt b (quotient e 2) m)]) (* h h)) m)]
     [else (modulo (* b (modular-expt b (sub1 e) m)) m)]))
 
-;; Euler's criterion, mod the field prime.
 (define (quadratic-residue? v)
   (= 1 (modular-expt v (quotient (- field-prime 1) 2) field-prime)))
 
-;; The smallest x for which no point has that x-coordinate.
 (define non-residue-x
   (for/first ([x (in-naturals 1)]
               #:unless (quadratic-residue? (modulo (+ (* x x x) 7) field-prime)))
@@ -74,19 +72,16 @@
 (define (random-digest rng)
   (random-bytes rng 32))
 
-;; Uniform 32 bytes whose value is a valid secret key.
 (define (random-secret-bytes rng)
   (define bs (random-bytes rng 32))
   (define v (bytes->integer bs))
   (if (< 0 v n) bs (random-secret-bytes rng)))
 
-;; count uniform secrets, then the edge set.
 (define (secret-samples rng count)
   (append (for/list ([_ (in-range count)])
             (random-secret-bytes rng))
           (map integer->bytes32 edge-integers)))
 
-;; A test case with a seeded generator; the seed is printed when a check fails.
 (define-syntax-parse-rule (test-seeded name:expr #:seed (seed:expr ...) rng:id body:expr ...+)
   (test-case name
     (define rng (seeded seed ...))
@@ -98,7 +93,6 @@
        (regexp-match? (regexp (string-append "blaming: [^\n]*" (regexp-quote file-name)))
                       (exn-message e))))
 
-;; A contract violation blaming the module this form appears in.
 (define-syntax-parse-rule (check-blames-here expr)
   #:with file-name
   (datum->syntax #'expr (path->string (file-name-from-path (syntax-source this-syntax))))

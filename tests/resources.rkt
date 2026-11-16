@@ -3,8 +3,8 @@
 (module+ test
   (require rackunit
            libsecp256k1
-           "bounded.rkt"
-           "util.rkt")
+           "helpers/bounded.rkt"
+           "helpers/util.rkt")
 
   (test-case "100,000 signs, verifies and parses run in bounded memory"
     (define key (bytes->secret-key (integer->bytes32 77)))

@@ -4,7 +4,7 @@
   (require racket/list
            rackunit
            libsecp256k1
-           "util.rkt")
+           "helpers/util.rkt")
 
   (define (key-of v) (bytes->secret-key (integer->bytes32 v)))
   (define (pub-of v) (secret-key->public-key (key-of v)))
@@ -147,13 +147,33 @@
       (check-exn exn:fail:libsecp256k1:key?
                  (lambda () (bytes->public-key (bad-public-key-bytes b))))))
 
-  (test-case "a bad prefix is named in the message"
-    (check-exn (regexp (regexp-quote
-                        (string-append "bytes->public-key: invalid public key;\n"
-                                       " expected prefix 02 or 03 for 33 bytes, 04 for 65 bytes\n"
-                                       "  prefix: #x06")))
+  (test-case "a bad prefix is described without the bytes given"
+    (check-exn (lambda (e)
+                 (equal? (exn-message e)
+                         (string-append "bytes->public-key: invalid public key;\n"
+                                        " expected prefix 02 or 03 for 33 bytes, 04 for 65"
+                                        " bytes")))
                (lambda () (bytes->public-key (with-prefix 6 g-uncompressed))))
     (check-exn (regexp (regexp-quote
                         (string-append "bytes->public-key: invalid public key;\n"
                                        " the bytes do not encode a point on the curve")))
-               (lambda () (bytes->public-key (bytes-append #"\2" (field-bytes 0)))))))
+               (lambda () (bytes->public-key (bytes-append #"\2" (field-bytes 0))))))
+
+  (test-seeded "integer->secret-key and secret-key->integer are inverses on [1, n)"
+    #:seed (17 18 19 20 21 22) rng
+    (for ([bs (in-list (secret-samples rng 200))])
+      (define v (bytes->integer bs))
+      (check-equal? (secret-key->integer (integer->secret-key v)) v)
+      (check-equal? (secret-key->bytes (integer->secret-key v)) bs)
+      (check-equal? (secret-key->integer (bytes->secret-key bs)) v)))
+
+  (test-case "integer->secret-key refuses values outside [1, n) without showing them"
+    (for ([v (list 0 -1 n (+ n 1) (- n) (expt 2 256))])
+      (check-exn (lambda (e)
+                   (and (exn:fail:libsecp256k1:key? e)
+                        (equal? (exn-message e)
+                                (string-append "integer->secret-key: invalid secret key;\n"
+                                               " the value is less than 1 or not less than the"
+                                               " curve order"))))
+                 (lambda () (integer->secret-key v))
+                 (format "~a" v)))))

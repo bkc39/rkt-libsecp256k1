@@ -15,7 +15,7 @@
          (struct-out tiny-invalid-row)
          (struct-out wycheproof-row))
 
-(define-runtime-path vectors-dir "vectors")
+(define-runtime-path vectors-dir "../vectors")
 
 (struct nonce-row (secret message nonce) #:transparent)
 (struct signing-row (secret digest compact recovery-id) #:transparent)

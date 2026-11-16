@@ -1,7 +1,8 @@
 #lang racket/base
 
 (module+ test
-  (require racket/list
+  (require racket/file
+           racket/list
            racket/port
            racket/runtime-path
            racket/string
@@ -50,22 +51,25 @@
       (with-output-to-string
         (lambda ()
           (show-error (raise-user-error 'f "first\n  second")))))
-    (check-equal? out "> (raise-user-error 'f \"first\\n  second\")\n; exn:fail:user\n; f: first\n;   second\n"))
+    (check-equal? out (string-append "> (raise-user-error 'f \"first\\n  second\")\n"
+                                     "; exn:fail:user\n; f: first\n;   second\n")))
 
-  (test-case "show-error #:as binds the exception"
+  (test-case "show-error stops a contract violation before its location lines"
     (define out
       (with-output-to-string
         (lambda ()
-          (show-error (error 'g "boom") #:as e)
-          (check-equal? (exn-message e) "g: boom"))))
-    (check-equal? out "> (error 'g \"boom\")\n; exn:fail\n; g: boom\n"))
+          (show-error (raise-user-error 'f "violation\n  expected: x\n  in: y\n  at: z")))))
+    (check-equal? out (string-append "> (raise-user-error 'f \"violation\\n  expected: x"
+                                     "\\n  in: y\\n  at: z\")\n; exn:fail:user\n"
+                                     "; f: violation\n;   expected: x\n")))
 
   (test-case "show-error replaces each run of control characters in a line with an ellipsis"
     (define out
       (with-output-to-string
         (lambda ()
           (show-error (error 'h "a\0\1b\tc\r\nd\e")))))
-    (check-equal? out "> (error 'h \"a\\u0000\\u0001b\\tc\\r\\nd\\e\")\n; exn:fail\n; h: a…b…c…\n; d…\n"))
+    (check-equal? out (string-append "> (error 'h \"a\\u0000\\u0001b\\tc\\r\\nd\\e\")\n"
+                                     "; exn:fail\n; h: a…b…c…\n; d…\n")))
 
   (test-case "show-error shows a syntax error its expression raises when it expands"
     (define out
@@ -73,15 +77,21 @@
         (lambda ()
           (show-error (let ())))))
     (check-equal? (take (string-split out "\n") 3)
-                  '("> (let ())" "; exn:fail:syntax" "; let: bad syntax (missing binding pairs or body)")))
+                  '("> (let ())"
+                    "; exn:fail:syntax"
+                    "; let: bad syntax (missing binding pairs or body)")))
 
   (test-case "show-error fails when nothing is raised"
     (check-exn #rx"^show-error: 1 raised no exception$"
                (lambda () (with-output-to-string (lambda () (show-error 1))))))
 
+  (define (transcript-path name)
+    (build-path examples-dir "transcripts" (path-replace-extension name #".txt")))
+
   (for ([name (in-list example-names)])
-    (test-case (format "~a runs, and every section prints" name)
+    (test-case (format "~a prints its committed transcript, and every section prints" name)
       (define out (run-example name))
+      (check-equal? out (file->string (transcript-path name)))
       (check-regexp-match #rx"^\n;;;; " out)
       (check-false (regexp-match? #rx";;;; [^\n]*\n\n\n;;;; " out))
       (check-false (regexp-match? #rx";;;; [^\n]*\n\n$" out)))))

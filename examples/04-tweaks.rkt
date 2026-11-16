@@ -1,21 +1,13 @@
 #lang racket/base
 
-;; 04: tweaks, negation and sums.
-;;
-;; Adding t to a secret key k and adding tG to its public key kG give a
-;; matching pair; this is how hierarchical wallets derive child keys.
-;;
-;;   racket examples/04-tweaks.rkt
-;;   racket -i -e '(enter! "examples/04-tweaks.rkt")'   ; then keep typing
-
 (require file/sha1
          libsecp256k1
          "common.rkt")
 
 (provide (all-defined-out))
 
-(define one (bytes->secret-key (bytes-append (make-bytes 31 0) #"\1")))
-(define two (bytes->secret-key (bytes-append (make-bytes 31 0) #"\2")))
+(define one (integer->secret-key 1))
+(define two (integer->secret-key 2))
 (define g (secret-key->public-key one))
 (define tweak (sha256-bytes #"child 0"))
 
@@ -24,7 +16,6 @@
 (define child (secret-key-tweak-add one tweak))
 (show child)
 (show (secret-key->public-key child))
-(show (public-key-tweak-add g tweak))
 (show (equal? (secret-key->public-key child) (public-key-tweak-add g tweak)))
 
 (section "a zero tweak changes nothing")
@@ -41,10 +32,10 @@
 
 (section "sums of public keys")
 
-(show (public-key-combine g g))
+(show (bytes->hex-string (public-key->bytes (public-key-combine g g))))
 (show (equal? (public-key-combine g g) (secret-key->public-key two)))
 (show (equal? (public-key-combine g (secret-key->public-key two))
-              (public-key-tweak-add g (bytes-append (make-bytes 31 0) #"\2"))))
+              (public-key-tweak-add g (secret-key->bytes two))))
 
 (section "sums that are the point at infinity")
 

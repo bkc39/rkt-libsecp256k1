@@ -6,7 +6,7 @@
            racket/system
            rackunit
            libsecp256k1
-           "util.rkt")
+           "helpers/util.rkt")
 
   (define (run-cast cast . args)
     (string-trim (with-output-to-string
@@ -14,23 +14,15 @@
                      (parameterize ([current-error-port (open-output-nowhere)])
                        (apply system* cast args))))))
 
-  (define (major-version cast)
-    (define m (regexp-match #px"(\\d+)\\.\\d+\\.\\d+" (run-cast cast "--version")))
-    (and m (string->number (cadr m))))
-
   (define cast
-    (let ([env (getenv "LIBSECP256K1_CAST")]
-          [on-path (find-executable-path "cast")])
-      (cond
-        [(and env (not (string=? env ""))) env]
-        [(and on-path (let ([v (major-version on-path)]) (and v (>= v 1)))) on-path]
-        [else #f])))
+    (let ([env (getenv "LIBSECP256K1_CAST")])
+      (and env (not (string=? env "")) env)))
 
   (define (prefixed bs) (string-append "0x" (hex bs)))
 
   (cond
     [(not cast)
-     (displayln "skipping cast differential: no cast 1.x (set LIBSECP256K1_CAST)")]
+     (displayln "SKIPPED cast differential: LIBSECP256K1_CAST is not set")]
     [else
      (test-seeded "signatures and public keys match foundry's cast" #:seed (231 232 233 234 235 236)
        rng
@@ -44,7 +36,7 @@
                                    "--private-key" (prefixed secret) (prefixed digest))
                          (string-append (prefixed (ecdsa-signature->compact rsig))
                                         (number->string
-                                         (+ 27 (ecdsa-recoverable-signature-recovery-id rsig))
+                                         (+ 27 (ecdsa-recoverable-signature-id rsig))
                                          16)))
            (check-equal? (run-cast cast "wallet" "public-key" "--private-key" (prefixed secret))
                          (prefixed (subbytes (public-key->bytes (secret-key->public-key key)

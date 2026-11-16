@@ -1,0 +1,41 @@
+
+;;;; signing with a recovery id
+
+> rsig
+#<ecdsa-recoverable-signature 934b1ea10a4b3c1757e2b0c017d0b6143ce3c9a7e6a4a49860d7a6ab210ee3d82442ce9d2b916064108014783e923ec36b49743e2ffa1c4496f01a512aafd9e5 id=1>
+> (ecdsa-signature-r rsig)
+66622713665624427733710315200720396955896638749566533714623508373930515555288
+> (ecdsa-signature-s rsig)
+16401300452320261922100688354512281705028622471755817586694009013603023182309
+> (ecdsa-recoverable-signature-id rsig)
+1
+> (equal? (ecdsa-signature-r rsig) (ecdsa-signature-r (ecdsa-sign digest one)))
+#t
+
+;;;; recovering the signer
+
+> (ecdsa-recover rsig digest)
+#<public-key 0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798>
+> (equal? (ecdsa-recover rsig digest) one-public)
+#t
+
+;;;; another digest recovers another key
+
+> (ecdsa-recover rsig (sha256-bytes #"Hal Finney"))
+#<public-key 03e8e636e6e742c3e93580474b327b262e2c4ed2b82c8557418408d76a41281fcf>
+> (equal? (ecdsa-recover rsig (sha256-bytes #"Hal Finney")) one-public)
+#f
+
+;;;; an id that recovers nothing
+
+> (ecdsa-recover
+   (ecdsa-recoverable-signature (ecdsa-signature-r rsig) (ecdsa-signature-s rsig) 2)
+   digest)
+#f
+
+;;;; a recoverable signature is also a plain one
+
+> (ecdsa-signature? rsig)
+#t
+> (ecdsa-verify rsig digest one-public)
+#t

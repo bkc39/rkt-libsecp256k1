@@ -9,7 +9,7 @@
            racket/string
            rackunit
            (file "../native/vendor.rkt")
-           "vectors.rkt")
+           "helpers/vectors.rkt")
 
   (define-runtime-path vendored-dir "../native/secp256k1")
 

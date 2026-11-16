@@ -3,7 +3,7 @@
 (module+ test
   (require rackunit
            libsecp256k1
-           "util.rkt")
+           "helpers/util.rkt")
 
   (define (key->integer key) (bytes->integer (secret-key->bytes key)))
   (define (integer->key v) (bytes->secret-key (integer->bytes32 v)))

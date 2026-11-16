@@ -1,28 +1,18 @@
 #lang racket/base
 
-;; 01: signing and verifying.
-;;
-;; ECDSA signs a 32-byte digest; the caller hashes the message.  The nonce is
-;; derived from the key and the digest (RFC 6979), so signing is deterministic.
-;;
-;;   racket examples/01-sign-verify.rkt
-;;   racket -i -e '(enter! "examples/01-sign-verify.rkt")'   ; then keep typing
-
 (require file/sha1
          libsecp256k1
          "common.rkt")
 
 (provide (all-defined-out))
 
-(define one (bytes->secret-key (bytes-append (make-bytes 31 0) #"\1")))
-(define two (bytes->secret-key (bytes-append (make-bytes 31 0) #"\2")))
+(define one (integer->secret-key 1))
+(define two (integer->secret-key 2))
 (define one-public (secret-key->public-key one))
-(define two-public (secret-key->public-key two))
 
 (section "a digest")
 
-(define message #"Satoshi Nakamoto")
-(define digest (sha256-bytes message))
+(define digest (sha256-bytes #"Satoshi Nakamoto"))
 (show (bytes->hex-string digest))
 
 (section "signing")
@@ -39,7 +29,7 @@
 
 (show (ecdsa-verify sig digest one-public))
 (show (ecdsa-verify sig (sha256-bytes #"Satoshi Nakamoto!") one-public))
-(show (ecdsa-verify sig digest two-public))
+(show (ecdsa-verify sig digest (secret-key->public-key two)))
 
 (section "r and s are integers below the curve order")
 
@@ -58,3 +48,9 @@
 (show (ecdsa-verify high digest one-public))
 (show (ecdsa-signature-normalize high))
 (show (ecdsa-verify (ecdsa-signature-normalize high) digest one-public))
+
+(section "mistakes")
+
+(show-error (ecdsa-sign digest))
+(show-error (ecdsa-sign one digest))
+(show-error (ecdsa-sign (bytes->hex-string digest) one))

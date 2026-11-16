@@ -35,6 +35,7 @@
 (define (print-error e)
   (printf "; ~a\n" (exn-name e))
   (for ([line (in-list (string-split (exn-message e) "\n"))]
+        #:break (regexp-match? #rx"^  in: " line)
         #:unless (regexp-match? #px"^\\p{Cc}+$" line))
     (printf "; ~a\n" (regexp-replace #px": …$" (regexp-replace* #px"\\p{Cc}+" line "…") ""))))
 
@@ -43,10 +44,7 @@
   (define e (with-handlers ([exn:fail? values]) (thunk) #f))
   (unless e
     (error 'show-error "~s raised no exception" datum))
-  (print-error e)
-  e)
+  (print-error e))
 
-(define-syntax-parse-rule (show-error e:expr (~optional (~seq #:as id:id)))
-  (begin
-    (~? (define id (call-and-show-error 'e (lambda () (convert-syntax-error e))))
-        (void (call-and-show-error 'e (lambda () (convert-syntax-error e)))))))
+(define-syntax-parse-rule (show-error e:expr)
+  (call-and-show-error 'e (lambda () (convert-syntax-error e))))

@@ -7,7 +7,7 @@
            racket/runtime-path
            racket/string
            rackunit
-           "modules.rkt")
+           "helpers/modules.rkt")
 
   (define-runtime-path package-root "..")
 
