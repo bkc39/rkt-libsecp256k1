@@ -1,0 +1,20 @@
+# Racket build directories
+compiled/
+doc/
+*.zo
+*.zo~
+
+# Emacs backup and auto-save files
+*~
+\#*\#
+.\#*
+
+# Nix and direnv
+result
+result-*
+.direnv/
+
+.DS_Store
+
+# Native library built by the pre-installer
+native/build/

@@ -1,0 +1,2 @@
+native/secp256k1/** -text linguist-vendored
+tests/vectors/** -text
