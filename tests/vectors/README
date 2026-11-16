@@ -1,0 +1,31 @@
+Known-answer vectors.  tests/vendor.rkt checks the hashes below.
+
+rfc6979-nonces.rktd
+  The seven test_rfc6979 rows (secret, message, nonce) of trezor-firmware
+  crypto/tests/test_check.c at commit e22d597d27b3f57297d7a3d36a3b97b4ca5c09b1,
+  https://github.com/trezor/trezor-firmware/blob/e22d597d27b3f57297d7a3d36a3b97b4ca5c09b1/crypto/tests/test_check.c
+  Rows 1 and 2 are RFC 6979 A.2.5's key with "sample".
+  Licence: MIT (trezor-crypto), trezor-crypto/LICENSE.
+  Read by tests/ecdsa.rkt and tests/load.rkt.
+
+tiny-secp256k1/ecdsa.json
+  bitcoinjs/tiny-secp256k1 tests/fixtures/ecdsa.json, verbatim, at commit
+  17d82c7fe38239d3ba0451202895837885f80e1c,
+  https://github.com/bitcoinjs/tiny-secp256k1/blob/17d82c7fe38239d3ba0451202895837885f80e1c/tests/fixtures/ecdsa.json
+  Licence: MIT, tiny-secp256k1/LICENSE.
+  Read by tests/ecdsa.rkt, tests/cast.rkt, tests/concurrency.rkt and tests/load.rkt.
+
+wycheproof/ecdsa_secp256k1_sha256_bitcoin_test.json
+  Copied from the libsecp256k1 v0.8.0 tarball's src/wycheproof/, which took it from
+  Wycheproof at commit 7ae4532f417575ced2b1cbbabed81a7fecfaef5d,
+  https://github.com/C2SP/wycheproof/blob/7ae4532f417575ced2b1cbbabed81a7fecfaef5d/testvectors_v1/ecdsa_secp256k1_sha256_bitcoin_test.json
+  Licence: Apache-2.0, wycheproof/WYCHEPROOF_COPYING.
+  Read by tests/ecdsa.rkt and tests/fuzz.rkt.
+
+sha256:
+efc1265a7a53b3f2fd506ef2bbd8bda41d3f67d79bcdb6e57294259588c68538  rfc6979-nonces.rktd
+b830aa30d0ab3b6c51440caffac9206b24ae5450a387a2db73789f5ce795595d  tiny-secp256k1/ecdsa.json
+ae6f2b755062444d218c8de466a0c73b686f89285855353a2eae0ade5933d661  tiny-secp256k1/LICENSE
+446978cb3d1435284aa93c29f1fba448409a3b7b6ca8226349522a09b0acd397  trezor-crypto/LICENSE
+1be8742064fec73d670339f0036dec56b21baa94cb2d8e0fbbb6fb480f733869  wycheproof/ecdsa_secp256k1_sha256_bitcoin_test.json
+a68720e5ef022a30eab8ca573e11a68b598595cc65ce18c0b2460436592bf32e  wycheproof/WYCHEPROOF_COPYING
