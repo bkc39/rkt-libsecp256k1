@@ -1,13 +1,12 @@
 #lang racket/base
 
 (module+ test
-  (require racket/file
+  (require file/sha1
            racket/list
            racket/port
            racket/runtime-path
-           racket/string
            rackunit
-           "../examples/common.rkt")
+           libsecp256k1)
 
   (define-runtime-path examples-dir "../examples")
 
@@ -20,78 +19,47 @@
             (path->string p))
           string<?))
 
-  (define (run-example name)
+  (define (example-submodule name submodule)
+    `(submod (file ,(path->string (build-path examples-dir name))) ,submodule))
+
+  (define (run-main name)
     (with-output-to-string
       (lambda ()
         (parameterize ([current-namespace (make-base-namespace)])
-          (dynamic-require (build-path examples-dir name) #f)))))
+          (dynamic-require (example-submodule name 'main) #f)))))
+
+  (define (public-key-hex-of window)
+    (define k (string->number window 16))
+    (and (< 0 k secp256k1-order)
+         (bytes->hex-string (public-key->bytes (secret-key->public-key (integer->secret-key k))))))
+
+  (define (printed-secret-keys out)
+    (define hex-runs (regexp-match* #px"[0-9a-fA-F]{64,}" out))
+    (define x-coordinates (map (lambda (pk) (substring pk 2))
+                               (regexp-match* #px"0[23][0-9a-f]{64}" out)))
+    (for*/list ([run (in-list hex-runs)]
+                [i (in-range (- (string-length run) 63))]
+                [window (in-value (string-downcase (substring run i (+ i 64))))]
+                [pk (in-value (public-key-hex-of window))]
+                #:when (and pk (member (substring pk 2) x-coordinates)))
+      window))
 
   (test-case "examples are numbered 00, 01, ... without gaps"
     (check-equal? (map example-number example-names)
                   (range (length example-names)))
     (check-true (>= (length example-names) 5)))
 
-  (test-case "show indents the continuation lines of an expression"
-    (define lines
-      (string-split (with-output-to-string
-                      (lambda ()
-                        (show (string-length
-                               (string-append "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                                              "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-                                              "cccccccccccccccccccccccccccccc")))))
-                    "\n"))
-    (check-regexp-match #rx"^> [(]string-length$" (first lines))
-    (check-true (> (length lines) 2))
-    (for ([line (in-list (drop-right (rest lines) 1))])
-      (check-regexp-match #rx"^   " line))
-    (check-equal? (last lines) "90"))
-
-  (test-case "show-error prints the exception's name and message as comment lines"
-    (define out
-      (with-output-to-string
-        (lambda ()
-          (show-error (raise-user-error 'f "first\n  second")))))
-    (check-equal? out (string-append "> (raise-user-error 'f \"first\\n  second\")\n"
-                                     "; exn:fail:user\n; f: first\n;   second\n")))
-
-  (test-case "show-error stops a contract violation before its location lines"
-    (define out
-      (with-output-to-string
-        (lambda ()
-          (show-error (raise-user-error 'f "violation\n  expected: x\n  in: y\n  at: z")))))
-    (check-equal? out (string-append "> (raise-user-error 'f \"violation\\n  expected: x"
-                                     "\\n  in: y\\n  at: z\")\n; exn:fail:user\n"
-                                     "; f: violation\n;   expected: x\n")))
-
-  (test-case "show-error replaces each run of control characters in a line with an ellipsis"
-    (define out
-      (with-output-to-string
-        (lambda ()
-          (show-error (error 'h "a\0\1b\tc\r\nd\e")))))
-    (check-equal? out (string-append "> (error 'h \"a\\u0000\\u0001b\\tc\\r\\nd\\e\")\n"
-                                     "; exn:fail\n; h: a…b…c…\n; d…\n")))
-
-  (test-case "show-error shows a syntax error its expression raises when it expands"
-    (define out
-      (with-output-to-string
-        (lambda ()
-          (show-error (let ())))))
-    (check-equal? (take (string-split out "\n") 3)
-                  '("> (let ())"
-                    "; exn:fail:syntax"
-                    "; let: bad syntax (missing binding pairs or body)")))
-
-  (test-case "show-error fails when nothing is raised"
-    (check-exn #rx"^show-error: 1 raised no exception$"
-               (lambda () (with-output-to-string (lambda () (show-error 1))))))
-
-  (define (transcript-path name)
-    (build-path examples-dir "transcripts" (path-replace-extension name #".txt")))
+  (test-case "the secret-key scan finds a secret key printed beside its public key"
+    (define key (integer->secret-key 5))
+    (define out (format "~a ~a"
+                        (bytes->hex-string (secret-key->bytes key))
+                        (bytes->hex-string (public-key->bytes (secret-key->public-key key)))))
+    (check-equal? (printed-secret-keys out) (list (bytes->hex-string (secret-key->bytes key)))))
 
   (for ([name (in-list example-names)])
-    (test-case (format "~a prints its committed transcript, and every section prints" name)
-      (define out (run-example name))
-      (check-equal? out (file->string (transcript-path name)))
-      (check-regexp-match #rx"^\n;;;; " out)
-      (check-false (regexp-match? #rx";;;; [^\n]*\n\n\n;;;; " out))
-      (check-false (regexp-match? #rx";;;; [^\n]*\n\n$" out)))))
+    (test-case (format "~a has a test submodule" name)
+      (check-true (module-declared? (example-submodule name 'test) #t)))
+    (test-case (format "~a's main prints public keys and no secret key" name)
+      (define out (run-main name))
+      (check-regexp-match #px"0[23][0-9a-f]{64}" out)
+      (check-equal? (printed-secret-keys out) '()))))

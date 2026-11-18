@@ -1,7 +1,8 @@
 #lang racket/base
 
 (module+ test
-  (require racket/match
+  (require racket/list
+           racket/match
            racket/port
            racket/runtime-path
            racket/string
@@ -38,6 +39,22 @@
          (case-lambda
            [() #f]
            [(v) (and (not (void? v)) (with-output-to-string (lambda () (print v))))])))))
+
+  (define-runtime-path scribblings "../scribblings")
+
+  (define use-pattern #px"@(include-section|recorded-examples)\\[\"?([^]\"]+)")
+
+  (define (recorded-uses file)
+    (define text (call-with-input-file (build-path scribblings file) port->string))
+    (append*
+     (for/list ([use (in-list (regexp-match* use-pattern text #:match-select cdr))])
+       (match use
+         [(list "include-section" included) (recorded-uses included)]
+         [(list "recorded-examples" key) (list (string->symbol key))]))))
+
+  (test-case "the manual shows every recorded block once, in the order they are checked here"
+    (check-equal? (recorded-uses "libsecp256k1.scrbl")
+                  (map car (syntax->datum manual-examples))))
 
   (define ns (example-namespace))
 

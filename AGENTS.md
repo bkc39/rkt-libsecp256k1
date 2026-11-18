@@ -7,7 +7,7 @@ Guidance for agents working in this repository.
 `libsecp256k1`: FFI bindings to Bitcoin Core's libsecp256k1 C library for
 Racket — secret and public keys, deterministic ECDSA, public key recovery and
 key tweaks.  One package, one collection (`libsecp256k1`), one manual
-(`scribblings/libsecp256k1.scrbl`).  The first consumer is web3.rkt (local
+(`scribblings/libsecp256k1.scrbl`: a guide, then the reference).  The first consumer is web3.rkt (local
 signing).  It is unrelated to the pure-Racket `secp256k1` package.
 
 | path | holds |
@@ -32,8 +32,11 @@ signing).  It is unrelated to the pure-Racket `secp256k1` package.
 | `native-libs/LICENSE.libsecp256k1` | upstream's `COPYING`, the MIT notice the binaries ship under |
 | `native-libs/BUILDING.md` | how the candidates are built and updated |
 | `native-libs/libsecp256k1.*` | the staged library the loader opens, git-ignored |
-| `examples/` | numbered scripts (`NN-topic.rkt`) for reading and for the REPL; their output in `examples/transcripts/` |
+| `examples/` | numbered programs (`NN-topic.rkt`), one per guide section, each with a `main` and a `test` submodule |
+| `scribblings/guide.scrbl` | the guide: one section per example program |
+| `scribblings/reference.scrbl` | the reference: every public binding |
 | `scribblings/recorded.rkt` | the manual's examples with their recorded results |
+| `scribblings/utils.rkt` | `recorded-examples`, which shows them live or recorded |
 | `tests/helpers/` | shared test code, not run as tests |
 | `tests/vectors/` | known-answer vectors; sources, commits, hashes and licences in its `README` |
 
@@ -91,13 +94,16 @@ The gates are in `.racket-dev.rktd`.
   There is no exposed alloc/free pair, no `malloc`, no finalizer.
 - Every callout runs atomically (`call-as-atomic`): a callback that raises
   after a thread swap would return to a stale foreign context.
-- Every user-visible feature has an example.  A new example takes the next
-  number, gets a row in `examples/README.md` and a transcript, and is
-  compared with it by `tests/examples.rkt`.  Examples use only `section`,
-  `show` and `show-error`.
+- Every user-visible feature has a guide section and an example program.
+  A new example takes the next number and a row in `examples/README.md`.
+  Examples are plain programs on the public API: a `main` submodule prints
+  a few results, a `test` submodule pins them; narration belongs in the
+  guide, not in comments.  `tests/examples.rkt` runs every `main` and
+  checks that it prints no secret key.
 - Manual examples live in `scribblings/recorded.rkt` with their printed
-  results, so the manual builds without a usable C library;
-  `tests/docs.rkt` checks every recorded result against the library.
+  results, in the order the manual shows them, so the manual builds without
+  a usable C library; `tests/docs.rkt` checks every recorded result against
+  the library and that the manual shows each block once, in that order.
 - Each review finding that is fixed gets a test that fails without the fix.
 - `master` must always build: the package catalog follows it.  Bump
   `version` in `info.rkt` on API changes.

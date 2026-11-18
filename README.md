@@ -23,7 +23,9 @@ raco pkg install libsecp256k1
 (equal? (ecdsa-recover sig digest) (secret-key->public-key key))  ; #t
 ```
 
-The manual is `raco docs libsecp256k1`; `examples/` holds runnable scripts.
+The manual is `raco docs libsecp256k1`: a guide to keys, signing, recovery,
+encodings and tweaks, then the reference.  Each guide section has a runnable
+program in `examples/`, e.g. `racket -l libsecp256k1/examples/01-sign-verify`.
 
 Maintainers: `native-libs/BUILDING.md` says how the prebuilt libraries are
 built and updated.

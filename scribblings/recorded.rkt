@@ -4,7 +4,51 @@
 
 (define manual-examples
   (quote-syntax
-   ((secret-keys
+   ((guide-keys
+     [(define key (generate-secret-key))]
+     [key "#<secret-key>"]
+     [(define public (secret-key->public-key key))]
+     [(define stored (secret-key->bytes key))]
+     [(equal? (bytes->secret-key stored) key) "#f"]
+     [(equal? (secret-key->public-key (bytes->secret-key stored)) public) "#t"]
+     [(bytes-length (public-key->bytes public)) "33"]
+     [(bytes-length (public-key->bytes public #:compressed? #f)) "65"]
+     [(equal? (bytes->public-key (public-key->bytes public #:compressed? #f)) public) "#t"]
+     [(bytes->secret-key (make-bytes 32 0))
+      (error "bytes->secret-key: invalid secret key;
+ the value is zero or not less than the curve order")])
+    (guide-signing
+     [(define digest (sha256-bytes #"hello"))]
+     [(define sig (ecdsa-sign digest key))]
+     [(ecdsa-verify sig digest public) "#t"]
+     [(ecdsa-verify sig (sha256-bytes #"hello!") public) "#f"]
+     [(equal? (ecdsa-sign digest key) sig) "#t"]
+     [(ecdsa-signature-low-s? sig) "#t"])
+    (guide-recovery
+     [(define rsig (ecdsa-sign-recoverable digest key))]
+     [(equal? (ecdsa-recover rsig digest) public) "#t"]
+     [(equal? (ecdsa-recover rsig (sha256-bytes #"hello!")) public) "#f"]
+     [(ecdsa-verify rsig digest public) "#t"])
+    (guide-encodings
+     [(define compact (ecdsa-signature->compact sig))]
+     [(bytes-length compact) "64"]
+     [(equal? (compact->ecdsa-signature compact) sig) "#t"]
+     [(equal? (compact->ecdsa-recoverable-signature (ecdsa-signature->compact rsig)
+                                                    (ecdsa-recoverable-signature-id rsig))
+              rsig)
+      "#t"]
+     [(define der (ecdsa-signature->der sig))]
+     [(equal? (der->ecdsa-signature der) sig) "#t"]
+     [(der->ecdsa-signature (bytes-append der #"\0"))
+      (error "der->ecdsa-signature: invalid signature;
+ not strict DER, or r or s is negative or not less than the curve order")])
+    (guide-tweaks
+     [(define tweak (sha256-bytes (bytes-append (public-key->bytes public) #"\0\0\0\0")))]
+     [(define child (secret-key-tweak-add key tweak))]
+     [(equal? (secret-key->public-key child) (public-key-tweak-add public tweak)) "#t"]
+     [(public-key-combine public (public-key-negate public))
+      (error "public-key-combine: the sum is the point at infinity")])
+    (secret-keys
      [(define one (integer->secret-key 1))]
      [one "#<secret-key>"]
      [(secret-key->integer one) "1"]
