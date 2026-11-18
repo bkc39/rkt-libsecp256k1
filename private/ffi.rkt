@@ -106,8 +106,8 @@
 
 (begin-for-syntax
   (define-syntax-class failure
-    #:description
-    "a failure action: #f, (key-error message), (signature-error message) or (internal-error message)"
+    #:description (string-append "a failure action: #f, (key-error message),"
+                                 " (signature-error message) or (internal-error message)")
     #:attributes (make-exn message)
     (pattern #f
              #:with make-exn #'#f

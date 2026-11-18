@@ -15,7 +15,7 @@ signing).  It is unrelated to the pure-Racket `secp256k1` package.
 | `info.rkt` | package metadata, `pre-install-collection` |
 | `main.rkt` | the public module: `contract-out` over `private/*` and the exception structs; contracts and nothing else |
 | `private/exn.rkt` | the exception structs; `racket/base` only |
-| `private/scalar.rkt` | `secp256k1-order` and integer/32-byte conversions |
+| `private/scalar.rkt` | `secp256k1-order`, integer/32-byte conversions, `define/snapshot` |
 | `private/contracts.rkt` | the opaque contracts and `opaque->` |
 | `private/locate.rkt` | candidate libraries, `required-symbols`, `open-candidate`, `locate-library`; shared by the loader and the pre-installer |
 | `private/ffi.rkt` | the load attempt, the context, the callbacks, one callout per C symbol (`define-secp`), `libsecp256k1-origin` |
@@ -62,6 +62,10 @@ The gates are in `.racket-dev.rktd`.
   kind and length of what was given, never the value.  Every export that
   takes an argument is wrapped with `opaque->` in `main.rkt`;
   `tests/contracts.rkt` probes each one.
+- Every export that takes a caller's byte string copies it on entry
+  (`define/snapshot`) and works only on the copy, so another thread mutating
+  the buffer cannot split a Racket check from the C call;
+  `tests/snapshots.rkt` checks each export.
 - Errors a caller can meet are `exn:fail:libsecp256k1` or a subtype, or a
   contract violation.  Parsers take untrusted bytes and raise only their
   documented exception.
@@ -96,7 +100,8 @@ module); if neither works it prints why and what to do, and `raco setup`
 still succeeds so the package and its manual install.
 
 `LIBSECP256K1_LIBRARY` overrides the choice at load time: a path loads that
-file only, and `system` skips the bundled copy.  System candidates are
+file only (a relative path is relative to the current directory), and
+`system` skips the bundled copy.  System candidates are
 sonames resolved by the OS loader (Linux, BSD) or absolute paths built from
 explicit directories (macOS, Windows), never the current directory.
 
@@ -119,4 +124,5 @@ download the release tarball, check its hash against the release, then run
 `tests/load.rkt` run when `LIBSECP256K1_TEST_SYSTEM_LIB` names a system
 libsecp256k1.  Each prints a `SKIPPED` line otherwise.  The dev shell and
 `nix flake check` set both; the CI Racket lanes set `LIBSECP256K1_CAST`, and
-the system-library tests run in the `nix flake check` lane.
+the system-library tests run in the `nix flake check` lane and the Ubuntu
+stable lane (the distribution's package).

@@ -1,6 +1,10 @@
 #lang racket/base
 
+(require (for-syntax racket/base)
+         syntax/parse/define)
+
 (provide bytes->integer
+         define/snapshot
          half-order
          integer->bytes32
          secp256k1-order)
@@ -19,3 +23,9 @@
 (define (bytes->integer bs)
   (for/fold ([v 0]) ([b (in-bytes bs)])
     (+ (* v 256) b)))
+
+(define-syntax-parse-rule (define/snapshot (name:id arg:id ...) #:snapshot (copied:id ...+)
+                            body:expr ...+)
+  (define (name arg ...)
+    (let ([copied (bytes-copy copied)] ...)
+      body ...)))

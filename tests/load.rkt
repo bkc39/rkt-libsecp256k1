@@ -2,7 +2,9 @@
 
 (module+ test
   (require racket/file
+           racket/match
            racket/port
+           (only-in racket/string string-prefix?)
            racket/system
            rackunit
            libsecp256k1
@@ -39,6 +41,8 @@
 
   (define missing-library "/nonexistent/libsecp256k1.so")
 
+  (define so-suffix (bytes->string/utf-8 (system-type 'so-suffix)))
+
   (define load-failure-program
     '(begin
        (require libsecp256k1)
@@ -64,25 +68,99 @@
       (check-regexp-match (regexp-quote missing-library) (cadr o)))
     (check-equal? (if (list? outcomes) (cadddr outcomes) outcomes) 'returned))
 
-  (test-case "a missing file is reported with the loader's own reason and what to do"
+  (define no-library-hint
+    (string-append "  set LIBSECP256K1_LIBRARY to a libsecp256k1 file, or install libsecp256k1"
+                   " 0.2 or later with the recovery module"))
+
+  (test-case "a missing file is reported as missing, with what to do"
     (check-equal? (load-message missing-library)
-                  (string-append
-                   "libsecp256k1: no usable libsecp256k1 library\n"
-                   "  environment: " missing-library
-                   ": cannot open shared object file: No such file or directory\n"
-                   "  set LIBSECP256K1_LIBRARY to a libsecp256k1 file, or install libsecp256k1"
-                   " 0.2 or later with the recovery module")))
+                  (string-append "libsecp256k1: no usable libsecp256k1 library\n"
+                                 "  environment: " missing-library ": no such file\n"
+                                 no-library-hint)))
+
+  (define (write-garbage! path)
+    (call-with-output-file path #:exists 'truncate (lambda (out) (write-string "garbage" out))))
 
   (test-case "a file that is not a library is reported with the loader's reason"
-    (define garbage (make-temporary-file "libsecp256k1-garbage-~a.so"))
-    (call-with-output-file garbage #:exists 'truncate (lambda (out) (write-string "garbage" out)))
+    (define garbage (make-temporary-file (string-append "libsecp256k1-garbage-~a" so-suffix)))
+    (write-garbage! garbage)
     (define message (load-message (path->string garbage)))
     (delete-file garbage)
-    (define reason-line
-      (string-append "\n  environment: " (regexp-quote (path->string garbage)) ": [^\n]+\n"))
-    (check-regexp-match (regexp reason-line) message)
-    (check-regexp-match #rx"too short|ELF|[Mm]ach-?[Oo]|Win32" message)
-    (check-false (regexp-match? #rx"not found|No such file" message) message))
+    (match (regexp-match #rx"^([^\n]*)\n  environment: ([^\n]*)\n([^\n]*)$" message)
+      [(list _ head reason hint)
+       (check-equal? head "libsecp256k1: no usable libsecp256k1 library")
+       (check-equal? hint no-library-hint)
+       (define label (string-append (path->string garbage) ": "))
+       (check-true (string-prefix? reason label) reason)
+       (define loader-reason (substring reason (min (string-length label) (string-length reason))))
+       (check-regexp-match #rx"[a-zA-Z]" loader-reason)
+       (check-false (regexp-match? #rx"tried:|[Nn]o such file" loader-reason) loader-reason)]
+      [_ (fail (format "unexpected message: ~a" message))]))
+
+  (test-case "dyld's list of attempted paths is cut to the first attempt"
+    (define (reason system-error label)
+      (load-error-reason
+       (exn:fail (string-append "ffi-lib: could not load foreign library\n  path: " label
+                                "\n  system error: " system-error)
+                 (current-continuation-marks))
+       label))
+    (check-equal? (reason (string-append "dlopen(/x/l.dylib, 0x0006): tried: '/x/l.dylib' (not a"
+                                         " mach-o file), '/System/Volumes/Preboot/Cryptexes/OS/x/"
+                                         "l.dylib' (no such file), '/x/l.dylib' (not a mach-o file)")
+                          "/x/l.dylib")
+                  "not a mach-o file")
+    (check-equal? (reason (string-append "dlopen(/x/l.dylib, 0x0006): tried: '/x/l.dylib' (mach-o"
+                                         " file, but is an incompatible architecture (have 'x86_64',"
+                                         " need 'arm64e')), '/y/l.dylib' (no such file)")
+                          "/x/l.dylib")
+                  "mach-o file, but is an incompatible architecture (have 'x86_64', need 'arm64e')")
+    (check-equal? (reason "dlopen(/x/l.dylib, 0x0006): tried: '/d/l.dylib' (not a mach-o file)"
+                          "/x/l.dylib")
+                  "/d/l.dylib: not a mach-o file")
+    (check-equal? (reason "/x/l.so: file too short" "/x/l.so") "file too short"))
+
+  (test-case "an override path is loaded as named, without the platform suffix appended"
+    (when (file-exists? bundled-library)
+      (define dir (make-temporary-directory))
+      (define named (build-path dir "libsecp256k1-copy"))
+      (write-garbage! named)
+      (copy-file bundled-library (build-path dir (string-append "libsecp256k1-copy" so-suffix)))
+      (define-values (origin _lib failure) (locate-library (path->string named)))
+      (delete-directory/files dir)
+      (check-false origin)
+      (check-regexp-match (regexp (string-append "\n  environment: "
+                                                 (regexp-quote (path->string named)) ": "))
+                          (if failure (exn-message failure) ""))))
+
+  (define override-program
+    '(begin
+       (require libsecp256k1)
+       (write (with-handlers ([exn:fail:libsecp256k1:load? exn-message])
+                (libsecp256k1-origin)))))
+
+  (test-case "a relative override is the file in the current directory, never a search"
+    (when (file-exists? bundled-library)
+      (define elsewhere (make-temporary-directory))
+      (define here (make-temporary-directory))
+      (copy-file bundled-library (build-path elsewhere library-file-name))
+      (define outcome
+        (run-program override-program
+                     (list (cons "LIBSECP256K1_LIBRARY" library-file-name)
+                           (cons "LD_LIBRARY_PATH" (path->string elsewhere))
+                           (cons "DYLD_LIBRARY_PATH" (path->string elsewhere)))
+                     #:directory here))
+      (define-values (_base here-name _dir?) (split-path here))
+      (delete-directory/files elsewhere)
+      (delete-directory/files here)
+      (check-regexp-match (regexp (string-append "\n  environment: /[^\n]*/"
+                                                 (regexp-quote (path->string here-name)) "/"
+                                                 (regexp-quote library-file-name)
+                                                 ": no such file\n"))
+                          (if (string? outcome) outcome (format "~s" outcome)))))
+
+  (test-case "probes run in a directory only the user can open"
+    (with-temporary-directory dir
+      (check-equal? (bitwise-and (file-or-directory-permissions dir 'bits) #o077) 0)))
 
   (test-case "an unbuilt bundled library asks for raco setup first"
     (unless (file-exists? bundled-library)
@@ -98,9 +176,14 @@
                     (and (member "secp256k1_selftest" missing) #t)
                     (missing-reason missing)))))
 
-  (test-case "a library without the recovery module is refused with that reason"
+  (test-case "a library with none of the symbols is not a libsecp256k1 library"
     (check-equal? (run-program missing-symbols-program '())
-                  '(#t #t "lacks secp256k1_ecdsa_recover (built without the recovery module)"))
+                  '(#t #t "not a libsecp256k1 library")))
+
+  (test-case "a library without the recovery module is refused with that reason"
+    (check-equal? (missing-reason '("secp256k1_ecdsa_recover"
+                                    "secp256k1_ecdsa_recoverable_signature_parse_compact"))
+                  "lacks secp256k1_ecdsa_recover (built without the recovery module)")
     (check-equal? (missing-reason '("secp256k1_selftest"))
                   "lacks secp256k1_selftest (older than 0.2.0)"))
 

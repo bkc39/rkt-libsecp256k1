@@ -40,6 +40,14 @@ jobs:
         run: >-
           racket -l racket/base -l libsecp256k1
           -e "(unless (eq? (libsecp256k1-origin) 'bundled) (exit 1))"
+      - name: Enable the system-library tests with the distribution's libsecp256k1
+        if: matrix.os == 'ubuntu-latest' && matrix.racket-version == 'stable'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsecp256k1-dev
+          lib="$(realpath "$(dpkg -L libsecp256k1-dev | grep '/libsecp256k1\.so$')")"
+          objdump -p "$lib" | grep SONAME
+          echo "LIBSECP256K1_TEST_SYSTEM_LIB=$lib" >> "$GITHUB_ENV"
       - name: Check dependencies (with docs)
         run: raco setup --check-pkg-deps --unused-pkg-deps --pkgs libsecp256k1
       - name: Test

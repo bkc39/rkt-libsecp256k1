@@ -1,7 +1,7 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/contract exn:fail:contract:blame?)
+  (require (only-in racket/contract contract-name exn:fail:contract:blame?)
            rackunit
            libsecp256k1
            "helpers/leaks.rkt"
@@ -307,5 +307,8 @@
     (check-false (scalar/c n))
     (check-true (der-bytes/c (make-bytes 72)))
     (check-false (der-bytes/c (make-bytes 73)))
-    (check-equal? (map object-name (list digest/c secret-bytes/c der-bytes/c))
-                  '(digest/c secret-bytes/c der-bytes/c))))
+    (check-equal? (map contract-name (list digest/c secret-bytes/c der-bytes/c))
+                  '(digest/c secret-bytes/c der-bytes/c))
+    (check-regexp-match #rx"in: the 1st argument of\n +\\(opaque-> secret-bytes/c secret-key\\?\\)"
+                        (with-handlers ([exn:fail:contract:blame? exn-message])
+                          (bytes->secret-key (make-bytes 31))))))

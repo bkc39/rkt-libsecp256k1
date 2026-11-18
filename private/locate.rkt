@@ -2,9 +2,11 @@
 
 (require (for-syntax racket/base)
          (only-in ffi/unsafe ffi-lib ffi-obj-ref)
-         (only-in racket/file delete-directory/files make-temporary-directory)
-         (only-in racket/match match)
-         (only-in racket/string string-join string-split)
+         (only-in file/sha1 bytes->hex-string)
+         (only-in racket/file delete-directory/files)
+         (only-in racket/match == match)
+         (only-in racket/random crypto-random-bytes)
+         (only-in racket/string string-join string-prefix? string-split)
          racket/runtime-path
          (only-in setup/dirs get-lib-search-dirs)
          syntax/parse/define
@@ -13,6 +15,7 @@
 (provide bundled-library
          first-line
          library-file-name
+         load-error-reason
          locate-library
          missing-reason
          missing-symbols
@@ -24,8 +27,15 @@
          with-temporary-directory
          (struct-out candidate))
 
+(define (make-private-directory)
+  (define dir
+    (build-path (find-system-path 'temp-dir)
+                (string-append "libsecp256k1-" (bytes->hex-string (crypto-random-bytes 16)))))
+  (make-directory dir #o700)
+  dir)
+
 (define-syntax-parse-rule (with-temporary-directory dir:id body:expr ...+)
-  (let ([dir (make-temporary-directory)])
+  (let ([dir (make-private-directory)])
     (dynamic-wind
      void
      (lambda () body ...)
@@ -81,6 +91,7 @@
 
 (define (missing-reason missing)
   (cond
+    [(null? (remove* missing required-symbols)) "not a libsecp256k1 library"]
     [(member "secp256k1_ecdsa_recover" missing)
      "lacks secp256k1_ecdsa_recover (built without the recovery module)"]
     [(member "secp256k1_selftest" missing)
@@ -94,10 +105,14 @@
   (define system-error (regexp-match #rx"\n  system error: ([^\n]*)" (exn-message e)))
   (define reason (if system-error (cadr system-error) (first-line (exn-message e))))
   (define own-prefix (string-append label ": "))
-  (if (and (> (string-length reason) (string-length own-prefix))
-           (string=? (substring reason 0 (string-length own-prefix)) own-prefix))
-      (substring reason (string-length own-prefix))
-      reason))
+  (match (regexp-match dyld-first-attempt reason)
+    [(list _ (== label) why) why]
+    [(list _ path why) (format "~a: ~a" path why)]
+    [#f (if (string-prefix? reason own-prefix)
+            (substring reason (string-length own-prefix))
+            reason)]))
+
+(define dyld-first-attempt #rx"^dlopen\\(.*?\\): tried: '([^']*)' \\((.*?)\\)(?:, '|$)")
 
 (define (open-candidate c)
   (define label (format "~a: ~a" (candidate-origin c) (candidate-label c)))
@@ -116,6 +131,12 @@
   (with-temporary-directory empty
     (parameterize ([current-directory empty])
       (ffi-lib "libsecp256k1" (list version)))))
+
+;; ffi-lib tries a suffixed name before the given one unless the version list is empty.
+(define (load-file path)
+  (if (file-exists? path)
+      (ffi-lib path '())
+      (raise (exn:fail:filesystem "no such file" (current-continuation-marks)))))
 
 ;; dyld and LoadLibrary search the current directory for a bare name, so these systems get
 ;; absolute paths from an explicit list of directories.
@@ -141,7 +162,7 @@
                 #:when (file-exists? (build-path dir name)))
       (build-path dir name)))
   (if found
-      (ffi-lib found)
+      (load-file found)
       (raise (exn:fail:filesystem
               (format "not found in ~a" (string-join (map path->string dirs) ", "))
               (current-continuation-marks)))))
@@ -167,13 +188,13 @@
        (candidate 'system (soname v) (lambda () (load-soname v))))]))
 
 (define (path-candidate origin path)
-  (candidate origin (path->string path) (lambda () (ffi-lib path))))
+  (candidate origin (path->string path) (lambda () (load-file path))))
 
 (define (library-candidates setting)
   (cond
     [(member setting '(#f "")) (cons (path-candidate 'bundled bundled-library) system-candidates)]
     [(string=? setting "system") system-candidates]
-    [else (list (path-candidate 'environment (string->path setting)))]))
+    [else (list (path-candidate 'environment (path->complete-path (string->path setting))))]))
 
 (define (reason-line c reason)
   (if (and (eq? (candidate-origin c) 'bundled) (not (file-exists? bundled-library)))

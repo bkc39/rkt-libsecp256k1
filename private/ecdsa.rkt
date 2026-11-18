@@ -76,13 +76,13 @@
 (define (sign-compact who sign serialize digest key)
   (serialize who (sign who digest (secret-key-bytes key))))
 
-(define (ecdsa-sign digest key)
+(define/snapshot (ecdsa-sign digest key) #:snapshot (digest)
   (define compact
     (sign-compact 'ecdsa-sign secp256k1_ecdsa_sign secp256k1_ecdsa_signature_serialize_compact
                   digest key))
   (ecdsa-signature (compact-r compact) (compact-s compact)))
 
-(define (ecdsa-sign-recoverable digest key)
+(define/snapshot (ecdsa-sign-recoverable digest key) #:snapshot (digest)
   (match-define (cons compact id)
     (sign-compact 'ecdsa-sign-recoverable
                   secp256k1_ecdsa_sign_recoverable
@@ -90,13 +90,13 @@
                   digest key))
   (ecdsa-recoverable-signature (compact-r compact) (compact-s compact) id))
 
-(define (ecdsa-verify sig digest key)
+(define/snapshot (ecdsa-verify sig digest key) #:snapshot (digest)
   (secp256k1_ecdsa_verify 'ecdsa-verify
                           (signature->internal 'ecdsa-verify sig)
                           digest
                           (public-key-internal key)))
 
-(define (ecdsa-recover sig digest)
+(define/snapshot (ecdsa-recover sig digest) #:snapshot (digest)
   (define internal
     (secp256k1_ecdsa_recoverable_signature_parse_compact 'ecdsa-recover
                                                          (ecdsa-signature->compact sig)
@@ -116,11 +116,11 @@
      (ecdsa-recoverable-signature r high-s (bitwise-xor (ecdsa-recoverable-signature-id sig) 1))]
     [else (ecdsa-signature r high-s)]))
 
-(define (compact->ecdsa-signature compact)
+(define/snapshot (compact->ecdsa-signature compact) #:snapshot (compact)
   (secp256k1_ecdsa_signature_parse_compact 'compact->ecdsa-signature compact)
   (ecdsa-signature (compact-r compact) (compact-s compact)))
 
-(define (compact->ecdsa-recoverable-signature compact id)
+(define/snapshot (compact->ecdsa-recoverable-signature compact id) #:snapshot (compact)
   (secp256k1_ecdsa_recoverable_signature_parse_compact 'compact->ecdsa-recoverable-signature
                                                        compact id)
   (ecdsa-recoverable-signature (compact-r compact) (compact-s compact) id))
@@ -129,7 +129,7 @@
   (secp256k1_ecdsa_signature_serialize_der 'ecdsa-signature->der
                                            (signature->internal 'ecdsa-signature->der sig)))
 
-(define (der->ecdsa-signature der)
+(define/snapshot (der->ecdsa-signature der) #:snapshot (der)
   (define internal (secp256k1_ecdsa_signature_parse_der 'der->ecdsa-signature der))
   (cond
     [(and internal

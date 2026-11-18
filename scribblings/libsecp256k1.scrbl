@@ -255,8 +255,9 @@ Raised when the C library reports an internal error.}
 Which libsecp256k1 is in use.  @racket['bundled] means the copy compiled when the package was
 installed; @racket['system] means the operating system's @tt{libsecp256k1} (0.2 or later, with
 the recovery module), used when the package could not compile its own; @racket['environment]
-means the file named by the @tt{LIBSECP256K1_LIBRARY} environment variable.  If that variable
-is @tt{system}, only the system library is used.  The system library is found by the operating
+means the file named by the @tt{LIBSECP256K1_LIBRARY} environment variable: that file and no
+other, with a relative path taken from the current directory.  If that variable is
+@tt{system}, only the system library is used.  The system library is found by the operating
 system's loader in its own directories, never in the current directory.  Raises
 @racket[exn:fail:libsecp256k1:load] when none can be loaded; every other procedure that needs
 the C library raises it too.}

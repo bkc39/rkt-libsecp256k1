@@ -53,10 +53,9 @@
       (secret-key bs)
       (generate-secret-key)))
 
-(define (bytes->secret-key bs)
-  (define copy (bytes-copy bs))
-  (if (secp256k1_ec_seckey_verify 'bytes->secret-key copy)
-      (secret-key copy)
+(define/snapshot (bytes->secret-key bs) #:snapshot (bs)
+  (if (secp256k1_ec_seckey_verify 'bytes->secret-key bs)
+      (secret-key bs)
       (key-error 'bytes->secret-key
                  "invalid secret key;\n the value is zero or not less than the curve order")))
 
@@ -64,7 +63,8 @@
   (if (< 0 v secp256k1-order)
       (secret-key (integer->bytes32 v))
       (key-error 'integer->secret-key
-                 "invalid secret key;\n the value is less than 1 or not less than the curve order")))
+                 (string-append "invalid secret key;\n the value is less than 1 or not less than"
+                                " the curve order"))))
 
 (define (secret-key->bytes key)
   (bytes-copy (secret-key-bytes key)))
@@ -82,13 +82,13 @@
                         (secp256k1_ec_pubkey_create 'secret-key->public-key
                                                     (secret-key-bytes key))))
 
-(define (secret-key-tweak-add key tweak)
+(define/snapshot (secret-key-tweak-add key tweak) #:snapshot (tweak)
   (secret-key (secp256k1_ec_seckey_tweak_add 'secret-key-tweak-add (secret-key-bytes key) tweak)))
 
 (define (secret-key-negate key)
   (secret-key (secp256k1_ec_seckey_negate 'secret-key-negate (secret-key-bytes key))))
 
-(define (bytes->public-key bs)
+(define/snapshot (bytes->public-key bs) #:snapshot (bs)
   (cond
     [(not (memv (bytes-ref bs 0) (if (= (bytes-length bs) 33) '(2 3) '(4))))
      (key-error 'bytes->public-key
@@ -104,7 +104,7 @@
                                      (public-key-internal key)
                                      SECP256K1_EC_UNCOMPRESSED)))
 
-(define (public-key-tweak-add key tweak)
+(define/snapshot (public-key-tweak-add key tweak) #:snapshot (tweak)
   (internal->public-key 'public-key-tweak-add
                         (secp256k1_ec_pubkey_tweak_add 'public-key-tweak-add
                                                        (public-key-internal key)
