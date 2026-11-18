@@ -1,4 +1,4 @@
-Known-answer vectors.  tests/vendor.rkt checks the hashes below.
+Known-answer vectors.  tests/vectors.rkt checks the hashes below.
 
 rfc6979-nonces.rktd
   The seven test_rfc6979 rows (secret, message, nonce) of trezor-firmware
