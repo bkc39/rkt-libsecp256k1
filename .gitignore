@@ -16,5 +16,5 @@ result-*
 
 .DS_Store
 
-# Native library built by the pre-installer
-native/build/
+# The library the pre-installer stages from native-libs/candidates/
+/native-libs/libsecp256k1.*

@@ -1,2 +1,3 @@
-native/secp256k1/** -text linguist-vendored
+native-libs/candidates/*/* binary
+native-libs/LICENSE.libsecp256k1 -text
 tests/vectors/** -text

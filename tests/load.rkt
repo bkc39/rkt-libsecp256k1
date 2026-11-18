@@ -162,11 +162,25 @@
     (with-temporary-directory dir
       (check-equal? (bitwise-and (file-or-directory-permissions dir 'bits) #o077) 0)))
 
-  (test-case "an unbuilt bundled library asks for raco setup first"
-    (unless (file-exists? bundled-library)
-      (check-regexp-match #rx"\n  bundled: [^\n]*: not built\n" (load-message #f))
-      (check-regexp-match #rx"\n  run raco setup libsecp256k1, set LIBSECP256K1_LIBRARY"
-                          (load-message #f))))
+  (define (missing-bundled-message platform)
+    (define-values (_origin _lib failure)
+      (locate-library #f #:bundled (string->path missing-library) #:platform platform))
+    (exn-message failure))
+
+  (test-case "a bundled library missing on a platform that ships one asks for raco setup first"
+    (define message (missing-bundled-message "x86_64-linux"))
+    (check-regexp-match (regexp (string-append "\n  bundled: " (regexp-quote missing-library)
+                                               ": not installed\n"))
+                        message)
+    (check-regexp-match #rx"\n  run raco setup libsecp256k1, set LIBSECP256K1_LIBRARY[^\n]*$"
+                        message))
+
+  (test-case "on a platform without a bundled library the error names the platforms that ship one"
+    (define message (missing-bundled-message "riscv64-linux"))
+    (check-regexp-match (string-append "\n  bundled: none for riscv64-linux"
+                                       " [(]shipped for x86_64-linux and aarch64-macosx only[)]\n")
+                        message)
+    (check-regexp-match (string-append "\n" (regexp-quote no-library-hint) "$") message))
 
   (define missing-symbols-program
     '(begin

@@ -13,14 +13,16 @@
          "exn.rkt")
 
 (provide bundled-library
+         bundled-platform
+         bundled-platforms
          first-line
+         host-platform
          library-file-name
          load-error-reason
          locate-library
          missing-reason
          missing-symbols
-         native-build-dir
-         native-library-path
+         native-libs-dir
          open-candidate
          required-symbols
          system-candidates
@@ -45,16 +47,24 @@
 
 (define library-file-name (string-append "libsecp256k1" so-suffix))
 
-(define-runtime-path native-build-root (build-path 'up "native" "build"))
+(define-runtime-path bundled-library-path
+  (build-path 'up "native-libs"
+              (string-append "libsecp256k1" (bytes->string/utf-8 (system-type 'so-suffix)))))
 
-(define (native-build-dir root)
-  (build-path root "native" "build" (system-library-subpath #f)))
+(define bundled-library (simplify-path bundled-library-path))
 
-(define (native-library-path root)
-  (build-path (native-build-dir root) library-file-name))
+(define (native-libs-dir root)
+  (build-path root "native-libs"))
 
-(define bundled-library
-  (simplify-path (build-path native-build-root (system-library-subpath #f) library-file-name)))
+(define host-platform (path->string (system-library-subpath #f)))
+
+;; (platform candidate-directory file): the platforms a prebuilt library ships for.
+(define bundled-platforms
+  '(("x86_64-linux" "linux" "libsecp256k1.so")
+    ("aarch64-macosx" "darwin" "libsecp256k1.dylib")))
+
+(define (bundled-platform platform)
+  (assoc platform bundled-platforms))
 
 (define required-symbols
   '("secp256k1_context_create"
@@ -190,40 +200,49 @@
 (define (path-candidate origin path)
   (candidate origin (path->string path) (lambda () (load-file path))))
 
-(define (library-candidates setting)
+(define (library-candidates setting bundled)
   (cond
-    [(member setting '(#f "")) (cons (path-candidate 'bundled bundled-library) system-candidates)]
+    [(member setting '(#f "")) (cons (path-candidate 'bundled bundled) system-candidates)]
     [(string=? setting "system") system-candidates]
     [else (list (path-candidate 'environment (path->complete-path (string->path setting))))]))
 
-(define (reason-line c reason)
-  (if (and (eq? (candidate-origin c) 'bundled) (not (file-exists? bundled-library)))
-      (format "bundled: ~a: not built" (candidate-label c))
-      reason))
+(define (bundled-missing? c bundled)
+  (and (eq? (candidate-origin c) 'bundled) (not (file-exists? bundled))))
 
-(define (no-library-hint bundled-missing?)
+(define (shipped-platforms)
+  (string-join (map car bundled-platforms) " and "))
+
+(define (reason-line c reason bundled platform)
+  (cond
+    [(not (bundled-missing? c bundled)) reason]
+    [(bundled-platform platform) (format "bundled: ~a: not installed" (candidate-label c))]
+    [else (format "bundled: none for ~a (shipped for ~a only)" platform (shipped-platforms))]))
+
+(define (no-library-hint setup?)
   (string-append
-   (if bundled-missing? "run raco setup libsecp256k1, " "")
+   (if setup? "run raco setup libsecp256k1, " "")
    "set LIBSECP256K1_LIBRARY to a libsecp256k1 file, or install libsecp256k1 0.2 or later"
    " with the recovery module"))
 
-(define (locate-library setting)
-  (define candidates (library-candidates setting))
+(define (locate-library setting
+                        #:bundled [bundled bundled-library]
+                        #:platform [platform host-platform])
+  (define candidates (library-candidates setting bundled))
   (let loop ([cs candidates] [reasons '()])
     (match cs
       ['()
-       (define bundled-missing?
-         (for/or ([c (in-list candidates)])
-           (and (eq? (candidate-origin c) 'bundled) (not (file-exists? bundled-library)))))
+       (define setup?
+         (and (bundled-platform platform)
+              (for/or ([c (in-list candidates)]) (bundled-missing? c bundled))))
        (values #f #f
                (exn:fail:libsecp256k1:load
                 (string-join (append '("libsecp256k1: no usable libsecp256k1 library")
                                      (reverse reasons)
-                                     (list (no-library-hint bundled-missing?)))
+                                     (list (no-library-hint setup?)))
                              "\n  ")
                 (current-continuation-marks)))]
       [(cons c rest)
        (define-values (lib reason) (open-candidate c))
        (if lib
            (values (candidate-origin c) lib #f)
-           (loop rest (cons (reason-line c reason) reasons)))])))
+           (loop rest (cons (reason-line c reason bundled platform) reasons)))])))
