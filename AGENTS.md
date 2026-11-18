@@ -17,14 +17,18 @@ signing).  It is unrelated to the pure-Racket `secp256k1` package.
 | `private/exn.rkt` | the exception structs; `racket/base` only |
 | `private/scalar.rkt` | `secp256k1-order`, integer/32-byte conversions, `define/snapshot` |
 | `private/contracts.rkt` | the opaque contracts and `opaque->` |
-| `private/locate.rkt` | candidate libraries, `required-symbols`, `open-candidate`, `locate-library`; shared by the loader and the pre-installer |
+| `private/locate.rkt` | `bundled-platforms`, candidate libraries, `required-symbols`, `open-candidate`, `locate-library`; shared by the loader and the pre-installer |
 | `private/ffi.rkt` | the load attempt, the context, the callbacks, one callout per C symbol (`define-secp`), `libsecp256k1-origin` |
 | `private/keys.rkt` | `secret-key` and `public-key` and their operations (unchecked) |
 | `private/ecdsa.rkt` | signature structs and operations (unchecked) |
-| `private/install.rkt` | the pre-installer, which builds the C library; never requires `main.rkt`, `private/ffi.rkt`, `private/keys.rkt` or `private/ecdsa.rkt` |
-| `native/secp256k1/` | the vendored upstream subset, byte-identical to the release tarball, with `COPYING` and `MANIFEST.rktd` |
-| `native/vendor.rkt` | maintainer tool: release tarball to `native/secp256k1/` and `MANIFEST.rktd` |
-| `native/build/` | build output, git-ignored |
+| `private/install.rkt` | the pre-installer, which copies the platform's prebuilt library into `native-libs/`; never requires `main.rkt`, `private/ffi.rkt`, `private/keys.rkt` or `private/ecdsa.rkt` |
+| `native/upstream.json` | the pinned upstream release: version, tarball URL, sha256; read by `flake.nix` and `scripts/build-so.sh` |
+| `native/build.sh` | the one compile line, `native/build.sh <source-dir> <output>` |
+| `scripts/build-so.sh` | builds a portable candidate: `linux` in manylinux2014 (docker), `darwin` on a Mac |
+| `native-libs/candidates/` | the committed prebuilt libraries, `<platform>/libsecp256k1.{so,dylib}`, and their `SHA256SUMS` |
+| `native-libs/LICENSE.libsecp256k1` | upstream's `COPYING`, the MIT notice the binaries ship under |
+| `native-libs/BUILDING.md` | how the candidates are built and updated |
+| `native-libs/libsecp256k1.*` | the staged library the loader opens, git-ignored |
 | `examples/` | numbered scripts (`NN-topic.rkt`) for reading and for the REPL; their output in `examples/transcripts/` |
 | `scribblings/recorded.rkt` | the manual's examples with their recorded results |
 | `tests/helpers/` | shared test code, not run as tests |
@@ -35,15 +39,16 @@ directly.
 
 ## Commands
 
-Work inside the dev shell; it pins Racket, a C compiler, foundry's `cast`
-and a system libsecp256k1, and links this checkout (the link's setup runs
-the pre-installer, which compiles the bundled library).
+Work inside the dev shell; it pins Racket, foundry's `cast` and a system
+libsecp256k1, builds the flake's `native` package (the pinned release compiled
+by `native/build.sh`), stages it in `native-libs/` and links this checkout.
 
 ```bash
 nix develop -c raco test -x -p libsecp256k1    # tests, vectors, every example
 nix develop -c racket examples/00-keys.rkt
 nix develop -c raco setup --check-pkg-deps --unused-pkg-deps --pkgs libsecp256k1   # build, docs, deps
 nix flake check -L                             # hermetic build and tests
+scripts/build-so.sh linux                      # rebuild the linux candidate (docker)
 ```
 
 The gates are in `.racket-dev.rktd`.
@@ -54,9 +59,10 @@ The gates are in `.racket-dev.rktd`.
   `scribblings/libsecp256k1.scrbl` and a test.  API documentation lives in
   the manual, not in comments.
 - The manual is terse and shows Racket only.  It never mentions Nix.
-- Never edit `native/secp256k1/`.  Update it only with
-  `racket native/vendor.rkt <tarball> <version>`, then bump `version` in
-  `info.rkt`; `tests/vendor.rkt` recomputes every hash.
+- No upstream C source or header is committed (`tests/native.rkt` checks
+  it); the source is the release tarball pinned in `native/upstream.json`.
+- Every shipped library comes from `native/build.sh`; a change to the compile
+  line rebuilds and recommits every candidate and its `SHA256SUMS` line.
 - No argument value in any printed form, error message, contract violation,
   arity error or keyword error: a violation names what was expected and the
   kind and length of what was given, never the value.  Every export that
@@ -91,31 +97,35 @@ The gates are in `.racket-dev.rktd`.
 
 ## Installing and loading
 
-The pre-installer (`private/install.rkt`) compiles `native/secp256k1/` into
-`native/build/<platform>/` with the flags in its build table, and writes a
-stamp of the vendored version, manifest hash and table; a matching stamp
-skips the build.  A failed build deletes any stale library and stamp, then
-falls back to a system libsecp256k1 (0.2 or later, with the recovery
-module); if neither works it prints why and what to do, and `raco setup`
-still succeeds so the package and its manual install.
+The pre-installer (`private/install.rkt`) copies a library into
+`native-libs/`: the one under `LIBSECP256K1_NATIVE_LIB_PATH/lib/` when that is
+set (Nix), else the committed candidate for the platform (`bundled-platforms`:
+`x86_64-linux`, `aarch64-macosx`), else it keeps a library already staged.
+With none it prints what to do.  It never raises, so `raco setup` succeeds and
+the package and its manual install anywhere; it replaces the staged file by a
+rename, and only when the bytes differ.
 
-`LIBSECP256K1_LIBRARY` overrides the choice at load time: a path loads that
-file only (a relative path is relative to the current directory), and
-`system` skips the bundled copy.  System candidates are
-sonames resolved by the OS loader (Linux, BSD) or absolute paths built from
-explicit directories (macOS, Windows), never the current directory.
+At load time the order is the bundled library, then a system libsecp256k1 (0.2
+or later, with the recovery module).  `LIBSECP256K1_LIBRARY` overrides the
+choice: a path loads that file only (a relative path is relative to the current
+directory), and `system` skips the bundled copy.  System candidates are sonames
+resolved by the OS loader (Linux, BSD) or absolute paths built from explicit
+directories (macOS, Windows), never the current directory.
 
-`raco exe` and `raco distribute` carry the built library along, since it is
-a runtime path of the package.
+`raco exe` and `raco distribute` carry the staged library along, since it is a
+runtime path of the package.
 
-## Vendored source
+## Native library
 
-`native/secp256k1/` is the subset of the upstream v0.8.0 release tarball the
-build needs, byte-identical, with `MANIFEST.rktd` recording the tarball's
-sha256 and each file's.  `tests/vendor.rkt` recomputes them.  To update,
-download the release tarball, check its hash against the release, then run
-`racket native/vendor.rkt secp256k1-X.Y.Z.tar.gz X.Y.Z` and bump `version` in
-`info.rkt`.
+`native-libs/BUILDING.md` has the build and the update procedure.  In short:
+edit the pin in `native/upstream.json`, run `scripts/build-so.sh linux`,
+replace the linux line of `native-libs/candidates/SHA256SUMS`, update the
+expected pin in `tests/native.rkt`, push, and commit the darwin build CI
+uploads (`libsecp256k1-darwin`) with its `SHA256SUMS` line.  The linux
+candidate is reproducible and CI fails if a fresh build differs from it; it
+needs only `libc.so.6` and glibc 2.17.  Until a darwin candidate is committed,
+`tests/native.rkt` prints a `SKIPPED` line for it and the macOS CI lane
+installs the darwin build of the same run.
 
 ## Tests that need tools
 

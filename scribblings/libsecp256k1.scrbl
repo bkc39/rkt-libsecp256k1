@@ -68,8 +68,15 @@ The named contracts keep that guarantee only inside this library; @racket[secret
 in a caller's own @racket[->] contract prints the value like any other contract.  Racket's
 memory manager may copy key bytes, so this library cannot erase them from memory.
 
+@bold{Installation.} The package ships a prebuilt libsecp256k1 0.8.0 for x86_64 Linux
+(glibc 2.17 or later) and Apple-silicon macOS, and installing copies it into place; nothing is
+compiled.  On any other platform, install the operating system's libsecp256k1 0.2 or later,
+built with the recovery module, or name a library file with @tt{LIBSECP256K1_LIBRARY}; see
+@racket[libsecp256k1-origin].
+
 @bold{License.} This package is distributed under @bold{Apache-2.0 OR MIT}; the bundled
-libsecp256k1 source is distributed under @bold{MIT}.
+libsecp256k1 library is distributed under @bold{MIT}, with its notice in
+@filepath{native-libs/LICENSE.libsecp256k1}.
 
 @bold{Acknowledgements.} The libsecp256k1 contributors.
 
@@ -252,9 +259,9 @@ Raised when the C library reports an internal error.}
 @section{The C Library}
 
 @defproc[(libsecp256k1-origin) (or/c 'bundled 'system 'environment)]{
-Which libsecp256k1 is in use.  @racket['bundled] means the copy compiled when the package was
-installed; @racket['system] means the operating system's @tt{libsecp256k1} (0.2 or later, with
-the recovery module), used when the package could not compile its own; @racket['environment]
+Which libsecp256k1 is in use.  @racket['bundled] means the prebuilt copy shipped with the
+package; @racket['system] means the operating system's @tt{libsecp256k1} (0.2 or later, with
+the recovery module), used where no bundled copy loads; @racket['environment]
 means the file named by the @tt{LIBSECP256K1_LIBRARY} environment variable: that file and no
 other, with a relative path taken from the current directory.  If that variable is
 @tt{system}, only the system library is used.  The system library is found by the operating

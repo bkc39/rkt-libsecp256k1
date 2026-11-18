@@ -5,9 +5,98 @@ on:
     branches: [master]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  native:
+    name: Build libsecp256k1 (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            lib: libsecp256k1.so
+          - os: macos-latest
+            platform: darwin
+            lib: libsecp256k1.dylib
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the candidate from the pinned release
+        run: scripts/build-so.sh ${{ matrix.platform }}
+      - name: The fresh build is the committed candidate (linux)
+        if: matrix.platform == 'linux'
+        working-directory: native-libs/candidates
+        run: |
+          set -euo pipefail
+          grep ' linux/libsecp256k1.so$' SHA256SUMS | sha256sum -c -
+          git diff --exit-code --stat -- linux/
+      - name: Compare with the committed candidate (darwin)
+        if: matrix.platform == 'darwin'
+        working-directory: native-libs/candidates
+        run: |
+          shasum -a 256 darwin/libsecp256k1.dylib
+          grep ' darwin/libsecp256k1.dylib$' SHA256SUMS || echo "darwin candidate not committed"
+      - name: Needs glibc 2.17 or older and nothing but libc (linux)
+        if: matrix.platform == 'linux'
+        run: |
+          set -euo pipefail
+          lib=native-libs/candidates/linux/libsecp256k1.so
+          objdump -T "$lib" | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -V -u
+          newer=$(objdump -T "$lib" | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -V -u \
+                  | awk -F_ '{split($2,v,"."); if (v[1]>2 || (v[1]==2 && v[2]>17)) print}')
+          if [ -n "$newer" ]; then
+            echo "error: $lib needs glibc newer than 2.17: $newer" >&2
+            exit 1
+          fi
+          needed=$(objdump -p "$lib" | awk '/NEEDED/ {print $2}')
+          echo "NEEDED: $needed"
+          if [ "$needed" != "libc.so.6" ]; then
+            echo "error: $lib needs more than libc.so.6" >&2
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libsecp256k1-${{ matrix.platform }}
+          path: native-libs/candidates/${{ matrix.platform }}/${{ matrix.lib }}
+          if-no-files-found: error
+
+  old-glibc:
+    name: Load the linux candidate under glibc 2.17
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: dlopen it in manylinux2014 and resolve secp256k1_ecdsa_recover
+        run: |
+          set -euo pipefail
+          eval "$(grep '^MANYLINUX_' scripts/build-so.sh)"
+          docker run --rm -v "$PWD/native-libs/candidates/linux:/cand:ro" \
+            "$MANYLINUX_IMAGE@$MANYLINUX_DIGEST" bash -ec '
+            echo "glibc: $(ldd --version | head -1)"
+            cat > /tmp/probe.c <<EOF
+          #include <dlfcn.h>
+          #include <stdio.h>
+          int main(int argc, char **argv) {
+            void *h = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
+            if (!h) { fprintf(stderr, "dlopen failed: %s\n", dlerror()); return 1; }
+            if (!dlsym(h, "secp256k1_ecdsa_recover")) {
+              fprintf(stderr, "dlsym failed: %s\n", dlerror());
+              return 1;
+            }
+            printf("loaded %s and resolved secp256k1_ecdsa_recover\n", argv[1]);
+            return 0;
+          }
+          EOF
+            gcc /tmp/probe.c -o /tmp/probe -ldl
+            /tmp/probe /cand/libsecp256k1.so
+          '
+
   racket:
     name: Racket ${{ matrix.racket-version }} (${{ matrix.os }})
+    needs: native
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.experimental }}
     strategy:
@@ -34,8 +123,27 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1.9.1
       - name: Enable the cast differential
         run: echo "LIBSECP256K1_CAST=$(command -v cast)" >> "$GITHUB_ENV"
-      - name: Install libsecp256k1
-        run: raco pkg install --batch --auto --link --name libsecp256k1 "$GITHUB_WORKSPACE"
+      - name: Check for a committed darwin candidate
+        id: darwin
+        if: runner.os == 'macOS'
+        run: |
+          if [ -f native-libs/candidates/darwin/libsecp256k1.dylib ]; then
+            echo "committed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "committed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Use this run's darwin build, as no candidate is committed
+        if: runner.os == 'macOS' && steps.darwin.outputs.committed == 'false'
+        uses: actions/download-artifact@v4
+        with:
+          name: libsecp256k1-darwin
+          path: native-libs/candidates/darwin
+      - name: List this run's darwin build in SHA256SUMS
+        if: runner.os == 'macOS' && steps.darwin.outputs.committed == 'false'
+        working-directory: native-libs/candidates
+        run: shasum -a 256 darwin/libsecp256k1.dylib | tee -a SHA256SUMS
+      - name: Install from the prebuilt candidate, compiling nothing
+        run: raco pkg install --batch --auto --copy --name libsecp256k1 "$GITHUB_WORKSPACE"
       - name: The bundled library is the one loaded
         run: >-
           racket -l racket/base -l libsecp256k1
