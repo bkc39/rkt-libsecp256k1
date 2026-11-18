@@ -69,10 +69,10 @@ in a caller's own @racket[->] contract prints the value like any other contract.
 memory manager may copy key bytes, so this library cannot erase them from memory.
 
 @bold{Installation.} The package ships a prebuilt libsecp256k1 0.8.0 for x86_64 Linux
-(glibc 2.17 or later) and Apple-silicon macOS, and installing copies it into place; nothing is
-compiled.  On any other platform, install the operating system's libsecp256k1 0.2 or later,
-built with the recovery module, or name a library file with @tt{LIBSECP256K1_LIBRARY}; see
-@racket[libsecp256k1-origin].
+(glibc 2.17 or later) and Apple-silicon macOS only, and installing copies it into place;
+nothing is compiled.  On every other platform, including ARM Linux, Intel macOS and Windows,
+install the operating system's libsecp256k1 0.2 or later, built with the recovery module, or
+name a library file with @tt{LIBSECP256K1_LIBRARY}; see @racket[libsecp256k1-origin].
 
 @bold{License.} This package is distributed under @bold{Apache-2.0 OR MIT}; the bundled
 libsecp256k1 library is distributed under @bold{MIT}, with its notice in
@@ -259,13 +259,17 @@ Raised when the C library reports an internal error.}
 @section{The C Library}
 
 @defproc[(libsecp256k1-origin) (or/c 'bundled 'system 'environment)]{
-Which libsecp256k1 is in use.  @racket['bundled] means the prebuilt copy shipped with the
-package; @racket['system] means the operating system's @tt{libsecp256k1} (0.2 or later, with
-the recovery module), used where no bundled copy loads; @racket['environment]
-means the file named by the @tt{LIBSECP256K1_LIBRARY} environment variable: that file and no
-other, with a relative path taken from the current directory.  If that variable is
+Which libsecp256k1 is in use.  @racket['bundled] means the library in the package's
+@filepath{native-libs} directory.  Installation puts the prebuilt copy for the platform there,
+or, when @tt{LIBSECP256K1_NATIVE_LIB_PATH} is set, the @filepath{lib/libsecp256k1} file under
+it; installing for the running platform refuses that file, with a message, when it does not
+load or lacks a function this library calls.  @racket['system] means the operating system's
+@tt{libsecp256k1} (0.2 or later, with the recovery module), used where no bundled copy loads;
+@racket['environment] means the file named by the @tt{LIBSECP256K1_LIBRARY} environment
+variable: that file and no other, with a relative path taken from the current directory.  If that variable is
 @tt{system}, only the system library is used.  The system library is found by the operating
-system's loader in its own directories, never in the current directory.  Raises
+system's loader in its own directories (on macOS, also @filepath{/opt/homebrew/lib} unless
+@tt{DYLD_FALLBACK_LIBRARY_PATH} is set), never in the current directory.  Raises
 @racket[exn:fail:libsecp256k1:load] when none can be loaded; every other procedure that needs
 the C library raises it too.}
 

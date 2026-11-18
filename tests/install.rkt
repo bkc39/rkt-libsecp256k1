@@ -29,13 +29,26 @@
 
   (struct staging (result output))
 
-  (define (stage root #:platform platform #:native-dir [native-dir #f])
+  (define (stage root
+                 #:platform platform
+                 #:native-dir [native-dir #f]
+                 #:so-suffix [so-suffix (bytes->string/utf-8 (system-type 'so-suffix))]
+                 #:validate? [validate? #f])
     (define result (box #f))
     (define output
       (with-output-to-string
         (lambda ()
-          (set-box! result (stage-library! root #:platform platform #:native-dir native-dir)))))
+          (set-box! result (stage-library! root
+                                           #:platform platform
+                                           #:native-dir native-dir
+                                           #:so-suffix so-suffix
+                                           #:validate? validate?)))))
     (staging (unbox result) output))
+
+  (define (native-dir-with! root file-name text)
+    (define native (build-path root "native"))
+    (write-file! (build-path native "lib" file-name) text)
+    native)
 
   (test-case "on x86_64 Linux the linux candidate is staged, silently"
     (with-temporary-directory root
@@ -68,14 +81,28 @@
         (check-equal? (directory-list (build-path root "native-libs"))
                       (list (string->path "candidates"))))))
 
-  (test-case "a copy of the package without its platform's candidate says so"
+  (test-case "a shipped platform's missing candidate fails with its path and the system error"
     (with-temporary-directory root
       (write-file! (build-path root "native-libs" "candidates" "linux" "libsecp256k1.so") "linux")
       (define run (stage root #:platform "aarch64-macosx"))
-      (check-eq? (staging-result run) 'none)
-      (check-regexp-match (string-append "^libsecp256k1: this copy of the package lacks the"
-                                         " bundled library for aarch64-macosx; ")
-                          (staging-output run))))
+      (check-eq? (staging-result run) 'failed)
+      (check-equal? (staging-output run)
+                    (format (string-append "libsecp256k1: could not install ~a as ~a: copy-file:"
+                                           " cannot open source file (system error: ~a)\n")
+                            (build-path root "native-libs" "candidates" "darwin"
+                                        "libsecp256k1.dylib")
+                            (build-path root "native-libs" "libsecp256k1.dylib")
+                            "No such file or directory; errno=2"))))
+
+  (test-case "a read-only source is staged as an ordinary 755 file"
+    (with-temporary-directory root
+      (make-root! root)
+      (define candidate (build-path root "native-libs" "candidates" "linux" "libsecp256k1.so"))
+      (file-or-directory-permissions candidate #o444)
+      (stage root #:platform "x86_64-linux")
+      (check-equal? (file-or-directory-permissions (build-path root "native-libs" "libsecp256k1.so")
+                                                   'bits)
+                    #o755)))
 
   (test-case "staging twice leaves the staged file in place"
     (with-temporary-directory root
@@ -105,11 +132,63 @@
   (test-case "LIBSECP256K1_NATIVE_LIB_PATH's library is staged in place of the candidate"
     (with-temporary-directory root
       (make-root! root)
-      (define native (build-path root "native"))
-      (write-file! (build-path native "lib" library-file-name) "native build")
-      (define run (stage root #:platform "riscv64-linux" #:native-dir native))
+      (define native (native-dir-with! root "libsecp256k1.so" "native build"))
+      (define run (stage root #:platform "x86_64-linux" #:native-dir native))
       (check-eq? (staging-result run) 'environment)
-      (check-equal? (staged root library-file-name) "native build")))
+      (check-equal? (staging-output run) "")
+      (check-equal? (staged root "libsecp256k1.so") "native build")))
+
+  (test-case "a LIBSECP256K1_NATIVE_LIB_PATH library that cannot be loaded is not staged"
+    (with-temporary-directory root
+      (make-root! root)
+      (define native (native-dir-with! root "libsecp256k1.so" "native build"))
+      (define run (stage root #:platform "x86_64-linux" #:native-dir native #:validate? #t))
+      (check-eq? (staging-result run) 'candidate)
+      (check-regexp-match (regexp (string-append
+                                   "^libsecp256k1: not installing LIBSECP256K1_NATIVE_LIB_PATH: "
+                                   (regexp-quote (path->string (build-path native "lib"
+                                                                           "libsecp256k1.so")))
+                                   ": [^\n]+\n$"))
+                          (staging-output run))
+      (check-equal? (staged root "libsecp256k1.so") "linux candidate")))
+
+  (define host-library
+    (for/first ([path (in-list (list bundled-library
+                                     (let ([entry (bundled-platform host-platform)])
+                                       (and entry
+                                            (build-path package-root "native-libs" "candidates"
+                                                        (cadr entry) (caddr entry))))))]
+                #:when (and path (file-exists? path)))
+      path))
+
+  (cond
+    [(not host-library)
+     (displayln "SKIPPED usable LIBSECP256K1_NATIVE_LIB_PATH test: no library for this host")]
+    [else
+     (test-case "a LIBSECP256K1_NATIVE_LIB_PATH library the host loads is checked and staged"
+       (with-temporary-directory root
+         (define-values (_dir file-name _dir?) (split-path host-library))
+         (define native (build-path root "native"))
+         (make-directory* (build-path native "lib"))
+         (copy-file host-library (build-path native "lib" file-name))
+         (define run (stage root #:platform host-platform #:native-dir native #:validate? #t))
+         (check-eq? (staging-result run) 'environment)
+         (check-equal? (staging-output run) "")
+         (check-equal? (file->bytes (build-path root "native-libs" file-name))
+                       (file->bytes host-library))))])
+
+  (test-case "only a library for the host's own platform is loaded before it is staged"
+    (check-true (validate-on-host? host-platform))
+    (check-false (validate-on-host? (string-append "not-" host-platform))))
+
+  (test-case "a platform without a bundled library stages the target's file, not the host's"
+    (with-temporary-directory root
+      (make-root! root)
+      (define native (native-dir-with! root "libsecp256k1.dll" "windows build"))
+      (define run (stage root #:platform "win32\\x86_64" #:so-suffix ".dll" #:native-dir native))
+      (check-eq? (staging-result run) 'environment)
+      (check-equal? (staged root "libsecp256k1.dll") "windows build")
+      (check-false (staged root library-file-name))))
 
   (test-case "a LIBSECP256K1_NATIVE_LIB_PATH without the library falls back to the candidate"
     (with-temporary-directory root
@@ -132,21 +211,27 @@
       (write-file! (build-path root "native-libs" "libsecp256k1.so" "occupied") "")
       (define run (stage root #:platform "x86_64-linux"))
       (check-eq? (staging-result run) 'failed)
-      (check-regexp-match #rx"^libsecp256k1: could not install the bundled library: "
-                          (staging-output run))
+      (check-equal? (staging-output run)
+                    (format (string-append "libsecp256k1: could not install ~a as ~a:"
+                                           " rename-file-or-directory: cannot rename file or"
+                                           " directory (system error: ~a)\n")
+                            (build-path root "native-libs" "candidates" "linux"
+                                        "libsecp256k1.so")
+                            (build-path root "native-libs" "libsecp256k1.so")
+                            "Is a directory; errno=21"))
       (check-equal? (sort (map path->string (directory-list (build-path root "native-libs")))
                           string<?)
                     '("candidates" "libsecp256k1.so"))))
 
-  (test-case "the pre-installer reports a failure instead of raising"
-    (with-temporary-directory root
-      (define output (box #f))
-      (check-not-exn (lambda ()
-                       (set-box! output (with-output-to-string (lambda () (pre-installer root ""))))))
-      (check-regexp-match #rx"^libsecp256k1: " (unbox output))
-      (check-not-exn (lambda ()
-                       (with-output-to-string
-                         (lambda () (pre-installer root (build-path root "missing") #t)))))))
+  (test-case "the pre-installer prints an error staging raises, and returns"
+    (define env (environment-variables-copy (current-environment-variables)))
+    (environment-variables-set! env #"LIBSECP256K1_NATIVE_LIB_PATH" #f)
+    (define result (box 'unset))
+    (define output
+      (parameterize ([current-environment-variables env])
+        (with-output-to-string (lambda () (set-box! result (pre-installer "" ""))))))
+    (check-equal? (unbox result) (void))
+    (check-regexp-match #rx"^libsecp256k1: build-path: contract violation\n$" output))
 
   (test-case "the installed package's staged library is its source's"
     (define native-dir (getenv "LIBSECP256K1_NATIVE_LIB_PATH"))

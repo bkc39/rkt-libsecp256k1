@@ -49,10 +49,10 @@
             '';
           };
 
-          # The Racket package with the native library injected into native-libs/.
-          libsecp256k1 = pkgs.stdenv.mkDerivation {
-            pname = "racket-libsecp256k1";
-            inherit version;
+          # The Racket package, installed and tested.  With nativeLib, the pre-installer stages
+          # it through LIBSECP256K1_NATIVE_LIB_PATH; without, it stages the committed candidate.
+          racketPackage = { pname, nativeLib ? null }: pkgs.stdenv.mkDerivation ({
+            inherit pname version;
             # cleanSource alone drops *.so, the committed linux candidate among them.
             src = pkgs.lib.cleanSourceWith {
               src = ./.;
@@ -61,14 +61,12 @@
                 || pkgs.lib.hasInfix "/native-libs/candidates/" (toString path);
             };
             nativeBuildInputs = [ pkgs.racket ];
-            buildInputs = [ native ];
+            buildInputs = pkgs.lib.optional (nativeLib != null) nativeLib;
             buildPhase = ''
               runHook preBuild
               export HOME=$TMPDIR/home
               export PLTUSERHOME=$TMPDIR/racket-home
-              export LIBSECP256K1_NATIVE_LIB_PATH=${native}
-              mkdir -p "$HOME" "$PLTUSERHOME" native-libs
-              cp --no-preserve=mode ${native}/lib/${libFile pkgs} native-libs/
+              mkdir -p "$HOME" "$PLTUSERHOME"
               raco pkg install --batch --deps fail --no-setup --copy --scope user \
                 --name libsecp256k1 "$PWD"
               raco setup --check-pkg-deps --unused-pkg-deps --pkgs libsecp256k1
@@ -78,7 +76,6 @@
             checkPhase = ''
               runHook preCheck
               ${testEnv pkgs}
-              export LIBSECP256K1_NATIVE_LIB_PATH=${native}
               racket -l racket/base -l libsecp256k1 \
                 -e "(unless (eq? (libsecp256k1-origin) 'bundled) (exit 1))"
               raco test -x --timeout 120 -p libsecp256k1
@@ -90,7 +87,14 @@
               cp -r $PLTUSERHOME $out/share/racket-home
               runHook postInstall
             '';
-          };
+          } // pkgs.lib.optionalAttrs (nativeLib != null) {
+            LIBSECP256K1_NATIVE_LIB_PATH = nativeLib;
+          });
+
+          libsecp256k1 = racketPackage { pname = "racket-libsecp256k1"; nativeLib = native; };
+
+          # The package as the catalog installs it: the committed candidate, not the Nix build.
+          candidate = racketPackage { pname = "racket-libsecp256k1-candidate"; };
 
           # Stages the Nix-built library into native-libs/ for work outside the dev shell.
           copy-native-libs = pkgs.writeShellApplication {
@@ -105,7 +109,7 @@
         {
           default = libsecp256k1;
           inherit native libsecp256k1 copy-native-libs;
-        });
+        } // nixpkgs.lib.optionalAttrs (system == "x86_64-linux") { inherit candidate; });
 
       apps = forAllSystems (system: {
         copy-native-libs = {
@@ -115,9 +119,12 @@
         };
       });
 
-      checks = forAllSystems (system: {
-        inherit (self.packages.${system}) native libsecp256k1;
-      });
+      checks = forAllSystems (system:
+        {
+          inherit (self.packages.${system}) native libsecp256k1;
+        } // nixpkgs.lib.optionalAttrs (system == "x86_64-linux") {
+          inherit (self.packages.${system}) candidate;
+        });
 
       devShells = forAllSystems (system:
         let
@@ -130,14 +137,10 @@
             shellHook = ''
               ${testEnv pkgs}
               export LIBSECP256K1_NATIVE_LIB_PATH=${native}
-              mkdir -p native-libs
-              if ! cmp -s ${native}/lib/${libFile pkgs} native-libs/${libFile pkgs}; then
-                rm -f native-libs/${libFile pkgs}
-                cp --no-preserve=mode ${native}/lib/${libFile pkgs} native-libs/
-              fi
               id=$(printf '%s' "$PWD" | sha256sum | cut -c1-12)
               export PLTUSERHOME="''${XDG_CACHE_HOME:-$HOME/.cache}/libsecp256k1-devshell/$id"
-              stamp="$PLTUSERHOME/.setup-$(sha256sum info.rkt | cut -c1-12)"
+              stamp="$PLTUSERHOME/.setup-$(printf '%s\n' ${native} | cat - info.rkt | sha256sum \
+                | cut -c1-12)"
               if [ ! -f "$stamp" ]; then
                 mkdir -p "$PLTUSERHOME"
                 raco pkg remove --batch --no-setup --scope user libsecp256k1 >/dev/null 2>&1

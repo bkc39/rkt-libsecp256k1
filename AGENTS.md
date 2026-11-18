@@ -24,8 +24,10 @@ signing).  It is unrelated to the pure-Racket `secp256k1` package.
 | `private/install.rkt` | the pre-installer, which copies the platform's prebuilt library into `native-libs/`; never requires `main.rkt`, `private/ffi.rkt`, `private/keys.rkt` or `private/ecdsa.rkt` |
 | `native/upstream.json` | the pinned upstream release: version, tarball URL, sha256; read by `flake.nix` and `scripts/build-so.sh` |
 | `native/build.sh` | the one compile line, `native/build.sh <source-dir> <output>` |
-| `scripts/build-so.sh` | builds a portable candidate: `linux` in manylinux2014 (docker), `darwin` on a Mac |
-| `native-libs/candidates/` | the committed prebuilt libraries, `<platform>/libsecp256k1.{so,dylib}`, and their `SHA256SUMS` |
+| `native/toolchain.sh` | every other build parameter: the manylinux image digest, compilers, macOS deployment target, darwin install name and signing |
+| `scripts/build-so.sh` | builds a portable candidate: `linux` in manylinux2014 (docker), `darwin` on a Mac; records its build inputs |
+| `scripts/record-build-inputs.sh` | writes a candidate's line of `BUILD-INPUTS` |
+| `native-libs/candidates/` | the committed prebuilt libraries, `<platform>/libsecp256k1.{so,dylib}`, their `SHA256SUMS` and `BUILD-INPUTS` |
 | `native-libs/LICENSE.libsecp256k1` | upstream's `COPYING`, the MIT notice the binaries ship under |
 | `native-libs/BUILDING.md` | how the candidates are built and updated |
 | `native-libs/libsecp256k1.*` | the staged library the loader opens, git-ignored |
@@ -41,7 +43,8 @@ directly.
 
 Work inside the dev shell; it pins Racket, foundry's `cast` and a system
 libsecp256k1, builds the flake's `native` package (the pinned release compiled
-by `native/build.sh`), stages it in `native-libs/` and links this checkout.
+by `native/build.sh`), points `LIBSECP256K1_NATIVE_LIB_PATH` at it and links
+this checkout, so `raco setup`'s pre-installer stages it in `native-libs/`.
 
 ```bash
 nix develop -c raco test -x -p libsecp256k1    # tests, vectors, every example
@@ -61,8 +64,10 @@ The gates are in `.racket-dev.rktd`.
 - The manual is terse and shows Racket only.  It never mentions Nix.
 - No upstream C source or header is committed (`tests/native.rkt` checks
   it); the source is the release tarball pinned in `native/upstream.json`.
-- Every shipped library comes from `native/build.sh`; a change to the compile
-  line rebuilds and recommits every candidate and its `SHA256SUMS` line.
+- Every shipped library comes from `native/build.sh`.  A change to any build
+  input (`native/upstream.json`, `native/build.sh`, `native/toolchain.sh`)
+  rebuilds and recommits every candidate with its `SHA256SUMS` and
+  `BUILD-INPUTS` lines; `tests/native.rkt` fails until each is.
 - No argument value in any printed form, error message, contract violation,
   arity error or keyword error: a violation names what was expected and the
   kind and length of what was given, never the value.  Every export that
@@ -99,18 +104,24 @@ The gates are in `.racket-dev.rktd`.
 
 The pre-installer (`private/install.rkt`) copies a library into
 `native-libs/`: the one under `LIBSECP256K1_NATIVE_LIB_PATH/lib/` when that is
-set (Nix), else the committed candidate for the platform (`bundled-platforms`:
-`x86_64-linux`, `aarch64-macosx`), else it keeps a library already staged.
-With none it prints what to do.  It never raises, so `raco setup` succeeds and
-the package and its manual install anywhere; it replaces the staged file by a
-rename, and only when the bytes differ.
+set (Nix) and, when installing for the host's own platform, it loads and has
+`required-symbols`; else the committed candidate for the platform
+(`bundled-platforms`: `x86_64-linux`, `aarch64-macosx`); else it keeps a
+library already staged.  The platform and file suffix are the target's
+(`setup/cross-system`), so `raco cross` stages the target's library.  With no
+library it prints what to do, and a failed copy prints the paths and the system
+error.  It never raises, so `raco setup` succeeds and the package and its
+manual install anywhere; it replaces the staged file by a rename, and only when
+the bytes differ.  Other platforms (`aarch64-linux`, `x86_64-macosx`, Windows)
+get no bundled library and need a system one.
 
 At load time the order is the bundled library, then a system libsecp256k1 (0.2
 or later, with the recovery module).  `LIBSECP256K1_LIBRARY` overrides the
 choice: a path loads that file only (a relative path is relative to the current
 directory), and `system` skips the bundled copy.  System candidates are sonames
 resolved by the OS loader (Linux, BSD) or absolute paths built from explicit
-directories (macOS, Windows), never the current directory.
+directories (`system-search-dirs`: macOS adds `/opt/homebrew/lib` to dyld's
+default fallback; Windows uses `PATH`), never the current directory.
 
 `raco exe` and `raco distribute` carry the staged library along, since it is a
 runtime path of the package.
@@ -118,21 +129,27 @@ runtime path of the package.
 ## Native library
 
 `native-libs/BUILDING.md` has the build and the update procedure.  In short:
-edit the pin in `native/upstream.json`, run `scripts/build-so.sh linux`,
-replace the linux line of `native-libs/candidates/SHA256SUMS`, update the
-expected pin in `tests/native.rkt`, push, and commit the darwin build CI
-uploads (`libsecp256k1-darwin`) with its `SHA256SUMS` line.  The linux
+change the build inputs, run `scripts/build-so.sh linux`, replace the linux
+line of `native-libs/candidates/SHA256SUMS`, push, commit the darwin build CI
+uploads (`libsecp256k1-darwin`) with its `SHA256SUMS` line, and run
+`scripts/record-build-inputs.sh darwin`: every candidate is rebuilt, never
+only one.  `tests/native.rkt` fails while any shipped platform lacks a
+candidate, a `SHA256SUMS` line or a current `BUILD-INPUTS` line.  The linux
 candidate is reproducible and CI fails if a fresh build differs from it; it
-needs only `libc.so.6` and glibc 2.17.  Until a darwin candidate is committed,
-`tests/native.rkt` prints a `SKIPPED` line for it and the macOS CI lane
-installs the darwin build of the same run.
+needs only `libc.so.6` and glibc 2.17.  CI rebuilds the darwin candidate too
+and warns, without failing, when the bytes differ, as two macOS builds are not
+yet known to be reproducible.  The macOS CI lane installs the committed
+candidate.  `nix flake check` on x86_64-linux also installs and tests the
+committed linux candidate (the `candidate` check).
 
 ## Tests that need tools
 
 `tests/cast.rkt` (a differential against foundry's `cast`) runs when
 `LIBSECP256K1_CAST` names a `cast` binary; the system-library tests in
 `tests/load.rkt` run when `LIBSECP256K1_TEST_SYSTEM_LIB` names a system
-libsecp256k1.  Each prints a `SKIPPED` line otherwise.  The dev shell and
+libsecp256k1.  Each prints a `SKIPPED` line otherwise, as does the check
+of a usable `LIBSECP256K1_NATIVE_LIB_PATH` library in `tests/install.rkt` on a
+host with neither a staged library nor a candidate.  The dev shell and
 `nix flake check` set both; the CI Racket lanes set `LIBSECP256K1_CAST`, and
 the system-library tests run in the `nix flake check` lane and the Ubuntu
 stable lane (the distribution's package).

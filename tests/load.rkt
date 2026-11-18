@@ -7,6 +7,7 @@
            (only-in racket/string string-prefix?)
            racket/system
            rackunit
+           (only-in setup/dirs get-lib-search-dirs)
            libsecp256k1
            libsecp256k1/private/locate
            "helpers/util.rkt"
@@ -16,14 +17,17 @@
     (let ([exe (find-system-path 'exec-file)])
       (if (absolute-path? exe) exe (find-executable-path exe))))
 
-  (define (run-program program settings #:directory [directory (current-directory)])
+  (define (environment-with settings)
     (define env (environment-variables-copy (current-environment-variables)))
     (for ([s (in-list settings)])
       (environment-variables-set! env
                                   (string->bytes/utf-8 (car s))
                                   (and (cdr s) (string->bytes/utf-8 (cdr s)))))
+    env)
+
+  (define (run-program program settings #:directory [directory (current-directory)])
     (define out
-      (parameterize ([current-environment-variables env]
+      (parameterize ([current-environment-variables (environment-with settings)]
                      [current-directory directory])
         (with-output-to-string
           (lambda ()
@@ -164,7 +168,7 @@
 
   (define (missing-bundled-message platform)
     (define-values (_origin _lib failure)
-      (locate-library #f #:bundled (string->path missing-library) #:platform platform))
+      (locate-library #f #:bundled (string->path missing-library) #:system '() #:platform platform))
     (exn-message failure))
 
   (test-case "a bundled library missing on a platform that ships one asks for raco setup first"
@@ -181,6 +185,23 @@
                                        " [(]shipped for x86_64-linux and aarch64-macosx only[)]\n")
                         message)
     (check-regexp-match (string-append "\n" (regexp-quote no-library-hint) "$") message))
+
+  (define (macos-search-dirs settings)
+    (parameterize ([current-environment-variables (environment-with settings)])
+      (map path->string (system-search-dirs 'macosx))))
+
+  (define racket-lib-dirs (map path->string (get-lib-search-dirs)))
+
+  (test-case "on macOS a system library is searched for in the DYLD paths, then Homebrew's"
+    (check-equal? (macos-search-dirs '(("DYLD_LIBRARY_PATH" . "/a:relative:/b")
+                                       ("DYLD_FALLBACK_LIBRARY_PATH" . #f)))
+                  (append racket-lib-dirs
+                          '("/a" "/b" "/opt/homebrew/lib" "/usr/local/lib" "/usr/lib"))))
+
+  (test-case "on macOS DYLD_FALLBACK_LIBRARY_PATH replaces the default directories"
+    (check-equal? (macos-search-dirs '(("DYLD_LIBRARY_PATH" . #f)
+                                       ("DYLD_FALLBACK_LIBRARY_PATH" . "/f")))
+                  (append racket-lib-dirs '("/f"))))
 
   (define missing-symbols-program
     '(begin

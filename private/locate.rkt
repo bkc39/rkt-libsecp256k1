@@ -26,6 +26,7 @@
          open-candidate
          required-symbols
          system-candidates
+         system-search-dirs
          with-temporary-directory
          (struct-out candidate))
 
@@ -150,23 +151,23 @@
 
 ;; dyld and LoadLibrary search the current directory for a bare name, so these systems get
 ;; absolute paths from an explicit list of directories.
-(define (search-path-dirs variable)
+(define (search-path-dirs variable separator)
   (define value (getenv variable))
-  (define separator (if (eq? (system-type) 'windows) ";" ":"))
   (map string->path (filter absolute-path? (if value (string-split value separator) '()))))
 
-(define (explicit-dirs)
-  (case (system-type)
+(define (system-search-dirs [os (system-type)])
+  (case os
     [(macosx)
      (append (get-lib-search-dirs)
-             (search-path-dirs "DYLD_LIBRARY_PATH")
-             (match (search-path-dirs "DYLD_FALLBACK_LIBRARY_PATH")
-               ['() (map string->path '("/usr/local/lib" "/usr/lib"))]
+             (search-path-dirs "DYLD_LIBRARY_PATH" ":")
+             (match (search-path-dirs "DYLD_FALLBACK_LIBRARY_PATH" ":")
+               ['() (map string->path '("/opt/homebrew/lib" "/usr/local/lib" "/usr/lib"))]
                [dirs dirs]))]
-    [else (append (get-lib-search-dirs) (search-path-dirs "PATH"))]))
+    [(windows) (append (get-lib-search-dirs) (search-path-dirs "PATH" ";"))]
+    [else (append (get-lib-search-dirs) (search-path-dirs "PATH" ":"))]))
 
 (define (load-from-dirs name)
-  (define dirs (explicit-dirs))
+  (define dirs (system-search-dirs))
   (define found
     (for/first ([dir (in-list dirs)]
                 #:when (file-exists? (build-path dir name)))
@@ -200,10 +201,10 @@
 (define (path-candidate origin path)
   (candidate origin (path->string path) (lambda () (load-file path))))
 
-(define (library-candidates setting bundled)
+(define (library-candidates setting bundled system)
   (cond
-    [(member setting '(#f "")) (cons (path-candidate 'bundled bundled) system-candidates)]
-    [(string=? setting "system") system-candidates]
+    [(member setting '(#f "")) (cons (path-candidate 'bundled bundled) system)]
+    [(string=? setting "system") system]
     [else (list (path-candidate 'environment (path->complete-path (string->path setting))))]))
 
 (define (bundled-missing? c bundled)
@@ -226,8 +227,9 @@
 
 (define (locate-library setting
                         #:bundled [bundled bundled-library]
+                        #:system [system system-candidates]
                         #:platform [platform host-platform])
-  (define candidates (library-candidates setting bundled))
+  (define candidates (library-candidates setting bundled system))
   (let loop ([cs candidates] [reasons '()])
     (match cs
       ['()

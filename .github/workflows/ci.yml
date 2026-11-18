@@ -5,6 +5,9 @@ on:
     branches: [master]
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
@@ -25,8 +28,13 @@ jobs:
             lib: libsecp256k1.dylib
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Build the candidate from the pinned release
         run: scripts/build-so.sh ${{ matrix.platform }}
+      - name: The committed build inputs are the current ones
+        working-directory: native-libs/candidates
+        run: git diff --exit-code -- BUILD-INPUTS
       - name: The fresh build is the committed candidate (linux)
         if: matrix.platform == 'linux'
         working-directory: native-libs/candidates
@@ -34,12 +42,19 @@ jobs:
           set -euo pipefail
           grep ' linux/libsecp256k1.so$' SHA256SUMS | sha256sum -c -
           git diff --exit-code --stat -- linux/
-      - name: Compare with the committed candidate (darwin)
+      - name: Warn when the fresh build differs from the committed candidate (darwin)
         if: matrix.platform == 'darwin'
         working-directory: native-libs/candidates
         run: |
-          shasum -a 256 darwin/libsecp256k1.dylib
-          grep ' darwin/libsecp256k1.dylib$' SHA256SUMS || echo "darwin candidate not committed"
+          set -euo pipefail
+          committed="$(awk '$2 == "darwin/libsecp256k1.dylib" {print $1}' SHA256SUMS)"
+          fresh="$(shasum -a 256 darwin/libsecp256k1.dylib | cut -d' ' -f1)"
+          echo "committed: $committed"
+          echo "fresh:     $fresh"
+          if [ "$fresh" != "$committed" ]; then
+            echo "::warning title=darwin build differs from the committed candidate::fresh" \
+              "$fresh, committed $committed; the macOS lane tests the committed one"
+          fi
       - name: Needs glibc 2.17 or older and nothing but libc (linux)
         if: matrix.platform == 'linux'
         run: |
@@ -69,10 +84,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: dlopen it in manylinux2014 and resolve secp256k1_ecdsa_recover
         run: |
           set -euo pipefail
-          eval "$(grep '^MANYLINUX_' scripts/build-so.sh)"
+          . native/toolchain.sh
           docker run --rm -v "$PWD/native-libs/candidates/linux:/cand:ro" \
             "$MANYLINUX_IMAGE@$MANYLINUX_DIGEST" bash -ec '
             echo "glibc: $(ldd --version | head -1)"
@@ -114,6 +131,8 @@ jobs:
             experimental: false
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: Bogdanp/setup-racket@v1.15
         with:
           architecture: ${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
@@ -123,26 +142,7 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1.9.1
       - name: Enable the cast differential
         run: echo "LIBSECP256K1_CAST=$(command -v cast)" >> "$GITHUB_ENV"
-      - name: Check for a committed darwin candidate
-        id: darwin
-        if: runner.os == 'macOS'
-        run: |
-          if [ -f native-libs/candidates/darwin/libsecp256k1.dylib ]; then
-            echo "committed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "committed=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Use this run's darwin build, as no candidate is committed
-        if: runner.os == 'macOS' && steps.darwin.outputs.committed == 'false'
-        uses: actions/download-artifact@v4
-        with:
-          name: libsecp256k1-darwin
-          path: native-libs/candidates/darwin
-      - name: List this run's darwin build in SHA256SUMS
-        if: runner.os == 'macOS' && steps.darwin.outputs.committed == 'false'
-        working-directory: native-libs/candidates
-        run: shasum -a 256 darwin/libsecp256k1.dylib | tee -a SHA256SUMS
-      - name: Install from the prebuilt candidate, compiling nothing
+      - name: Install from the committed candidate, compiling nothing
         run: raco pkg install --batch --auto --copy --name libsecp256k1 "$GITHUB_WORKSPACE"
       - name: The bundled library is the one loaded
         run: >-
@@ -170,6 +170,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: cachix/install-nix-action@v31
       - name: Hermetic build and tests, with the system library and the cast differential
         run: nix flake check -L

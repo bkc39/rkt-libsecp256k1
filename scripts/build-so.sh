@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 #
 # Build the prebuilt libsecp256k1 the package installs from, and stage it as
-# native-libs/candidates/<platform>/.  The source is the release pinned in
-# native/upstream.json; the compile line is native/build.sh.
+# native-libs/candidates/<platform>/, and record its build inputs in
+# native-libs/candidates/BUILD-INPUTS (scripts/record-build-inputs.sh).  The
+# source is the release pinned in native/upstream.json, the compile line is
+# native/build.sh, and every platform parameter is in native/toolchain.sh.
 #
 # linux:  x86_64, inside manylinux2014 (glibc 2.17), so the library needs only
 #         GLIBC <= 2.17 and nothing beyond libc.  Needs docker.
@@ -12,8 +14,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MANYLINUX_IMAGE="quay.io/pypa/manylinux2014_x86_64"
-MANYLINUX_DIGEST="sha256:f6077fab327d7823d7cee287b93ef63efe3af0e234add7503121247c1475ebec"
+# shellcheck source=../native/toolchain.sh
+. "$ROOT/native/toolchain.sh"
 
 pin() {
   sed -n "s/^ *\"$1\": *\"\([^\"]*\)\".*/\1/p" "$ROOT/native/upstream.json"
@@ -62,23 +64,24 @@ echo ">> libsecp256k1 $version ($url)"
 if [[ "$platform" == linux ]]; then
   docker run --rm \
     -u "$(id -u):$(id -g)" \
-    -e HOME=/tmp -e CC=gcc \
+    -e HOME=/tmp -e CC="$LINUX_CC" \
     -e URL="$url" -e SHA256="$sha256" -e LIB="$lib" \
     -e BUILD=/src/native/build.sh -e OUT=/out \
     -v "$ROOT:/src:ro" \
     -v "$dest:/out" \
     "$MANYLINUX_IMAGE@$MANYLINUX_DIGEST" bash -c "$fetch_and_build"
 else
-  export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-11.0}"
-  URL="$url" SHA256="$sha256" LIB="$lib" BUILD="$ROOT/native/build.sh" OUT="$dest" CC=cc \
-    bash -c "$fetch_and_build"
-  install_name_tool -id "@rpath/$lib" "$dest/$lib"
-  codesign -f -s - "$dest/$lib"
+  export MACOSX_DEPLOYMENT_TARGET="$DARWIN_DEPLOYMENT_TARGET"
+  URL="$url" SHA256="$sha256" LIB="$lib" BUILD="$ROOT/native/build.sh" OUT="$dest" \
+    CC="$DARWIN_CC" bash -c "$fetch_and_build"
+  darwin_finish "$dest/$lib"
 fi
 
 echo ">> staged $dest/$lib"
 if command -v sha256sum >/dev/null; then sum=sha256sum; else sum="shasum -a 256"; fi
 (cd "$ROOT/native-libs/candidates" && $sum "$platform/$lib")
+echo ">> build inputs (native-libs/candidates/BUILD-INPUTS)"
+"$ROOT/scripts/record-build-inputs.sh" "$platform"
 
 echo ">> dynamic dependencies"
 if [[ "$platform" == darwin ]]; then

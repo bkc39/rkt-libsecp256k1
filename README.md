@@ -5,8 +5,9 @@ FFI bindings for Racket to Bitcoin Core's
 keys on the secp256k1 curve, deterministic ECDSA signatures (RFC 6979,
 low-S), public key recovery and key tweaks.  The package ships a prebuilt
 libsecp256k1 0.8.0 for x86_64 Linux (glibc 2.17 or later) and Apple-silicon
-macOS, so installing compiles nothing; elsewhere it uses a system libsecp256k1
-0.2 or later with the recovery module, or the file named by
+macOS only, so installing there compiles nothing.  Every other platform,
+including ARM Linux, Intel macOS and Windows, needs a system libsecp256k1 0.2
+or later with the recovery module, or the file named by
 `LIBSECP256K1_LIBRARY`.  It is unrelated to the pure-Racket `secp256k1`
 package.
 
