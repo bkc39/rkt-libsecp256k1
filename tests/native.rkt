@@ -7,8 +7,10 @@
            racket/file
            racket/list
            (only-in racket/path file-name-from-path find-relative-path simple-form-path)
+           (only-in racket/port open-output-nowhere)
            racket/runtime-path
            racket/string
+           (only-in racket/system system*)
            rackunit
            libsecp256k1/private/locate)
 
@@ -29,7 +31,8 @@
 
   (define recorded-inputs (read-record "BUILD-INPUTS"))
 
-  (define build-inputs '("native/upstream.json" "native/build.sh" "native/toolchain.sh"))
+  (define build-inputs
+    '("native/upstream.json" "native/build.sh" "native/toolchain.sh" "scripts/build-so.sh"))
 
   (define inputs-listing
     (for/list ([file (in-list build-inputs)])
@@ -62,7 +65,13 @@
   (test-case "candidates exist only for the platforms a library ships for"
     (check-equal? (remove* (map platform-candidate bundled-platforms) (candidate-files)) '()))
 
-  (test-case "every candidate was built from the current pin, compile line and toolchain"
+  (test-case "scripts/record-build-inputs.sh hashes the files this test hashes"
+    (define script (file->string (build-path package-root "scripts" "record-build-inputs.sh")))
+    (check-equal? (map string-split (regexp-match* #px"\nfiles=\\(([^)]*)\\)" script
+                                                   #:match-select cadr))
+                  (list build-inputs)))
+
+  (test-case "every candidate was built from the current pin, compile line, toolchain and script"
     (check-equal? (sort (map car recorded-inputs) string<?) (sort (map car recorded-sums) string<?))
     (for ([row (in-list recorded-inputs)])
       (check-equal? (cdr row) current-inputs (car row))))
@@ -107,4 +116,29 @@
   (test-case "the package holds no C source or header"
     (define files (package-files))
     (check-not-false (member "native/build.sh" files))
-    (check-equal? (filter (lambda (f) (regexp-match? #rx"[.][ch]$" f)) files) '())))
+    (check-equal? (filter (lambda (f) (regexp-match? #rx"[.][ch]$" f)) files) '()))
+
+  (define git (find-executable-path "git"))
+
+  (define (git-output . args)
+    (define out (open-output-string))
+    (define ok?
+      (parameterize ([current-output-port out]
+                     [current-error-port (open-output-nowhere)])
+        (apply system* git "-C" (path->string package-root) args)))
+    (and ok? (get-output-string out)))
+
+  (cond
+    [(not (and git (equal? (git-output "rev-parse" "--show-prefix") "\n")))
+     (displayln "SKIPPED checkout attribute test: the package is not the root of a git checkout")]
+    [else
+     (test-case "no checkout rewrites the line endings of a hashed or recorded file"
+       (define files (append build-inputs
+                             '("scripts/record-build-inputs.sh"
+                               "native-libs/candidates/SHA256SUMS"
+                               "native-libs/candidates/BUILD-INPUTS")
+                             (map (lambda (f) (string-append "native-libs/candidates/" f))
+                                  (map car recorded-sums))))
+       (check-equal? (apply git-output "check-attr" "text" "--" files)
+                     (string-append* (for/list ([f (in-list files)])
+                                       (format "~a: text: unset\n" f)))))]))

@@ -152,6 +152,35 @@
                           (staging-output run))
       (check-equal? (staged root "libsecp256k1.so") "linux candidate")))
 
+  (define loaded-libc
+    (and (file-exists? "/proc/self/maps")
+         (call-with-input-file "/proc/self/maps"
+           (lambda (in)
+             (for/first ([line (in-lines in)]
+                         #:when (regexp-match? #rx" /[^ ]*/libc[.]so[.]6$" line))
+               (cadr (regexp-match #rx" (/[^ ]*)$" line)))))))
+
+  (cond
+    [(not loaded-libc)
+     (displayln "SKIPPED loadable non-libsecp256k1 library test: no /proc/self/maps libc")]
+    [else
+     (test-case "a LIBSECP256K1_NATIVE_LIB_PATH library that is not libsecp256k1 is not staged"
+       (with-temporary-directory root
+         (make-root! root)
+         (define native (build-path root "native"))
+         (make-directory* (build-path native "lib"))
+         (define link (build-path native "lib" "libsecp256k1.so"))
+         ;; A link to the libc this process has mapped, so dlopen returns it, not a second libc.
+         (make-file-or-directory-link loaded-libc link)
+         (define run (stage root #:platform "x86_64-linux" #:native-dir native #:validate? #t))
+         (check-eq? (staging-result run) 'candidate)
+         (check-equal? (staging-output run)
+                       (format (string-append "libsecp256k1: not installing"
+                                              " LIBSECP256K1_NATIVE_LIB_PATH: ~a:"
+                                              " not a libsecp256k1 library\n")
+                               link))
+         (check-equal? (staged root "libsecp256k1.so") "linux candidate")))])
+
   (define host-library
     (for/first ([path (in-list (list bundled-library
                                      (let ([entry (bundled-platform host-platform)])

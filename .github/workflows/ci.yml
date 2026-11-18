@@ -42,19 +42,23 @@ jobs:
           set -euo pipefail
           grep ' linux/libsecp256k1.so$' SHA256SUMS | sha256sum -c -
           git diff --exit-code --stat -- linux/
-      - name: Warn when the fresh build differs from the committed candidate (darwin)
+      - uses: Bogdanp/setup-racket@v1.15
         if: matrix.platform == 'darwin'
-        working-directory: native-libs/candidates
+        with:
+          architecture: arm64
+          distribution: minimal
+          variant: CS
+          version: stable
+      - name: >-
+          The fresh darwin build matches the committed candidate apart from its UUID
+          and signature
+        if: matrix.platform == 'darwin'
         run: |
           set -euo pipefail
-          committed="$(awk '$2 == "darwin/libsecp256k1.dylib" {print $1}' SHA256SUMS)"
-          fresh="$(shasum -a 256 darwin/libsecp256k1.dylib | cut -d' ' -f1)"
-          echo "committed: $committed"
-          echo "fresh:     $fresh"
-          if [ "$fresh" != "$committed" ]; then
-            echo "::warning title=darwin build differs from the committed candidate::fresh" \
-              "$fresh, committed $committed; the macOS lane tests the committed one"
-          fi
+          git show HEAD:native-libs/candidates/darwin/libsecp256k1.dylib \
+            > "$RUNNER_TEMP/committed.dylib"
+          racket scripts/compare-darwin.rkt "$RUNNER_TEMP/committed.dylib" \
+            native-libs/candidates/darwin/libsecp256k1.dylib
       - name: Needs glibc 2.17 or older and nothing but libc (linux)
         if: matrix.platform == 'linux'
         run: |

@@ -19,12 +19,13 @@ own platform.
 
 `candidates/SHA256SUMS` records the sha256 of every committed candidate, and
 `candidates/BUILD-INPUTS` the build inputs each was built from: the sha256 of
-the `sha256sum` listing of `native/upstream.json`, `native/build.sh` and
-`native/toolchain.sh`, taken from the package root.  `tests/native.rkt` fails
-when a shipped platform has no candidate or no line in either file, when a
-file differs from its sha256, or when a recorded build-inputs hash is not the
-current one.  `LICENSE.libsecp256k1` is upstream's `COPYING`, the MIT notice
-the binaries are distributed under.
+the `sha256sum` listing of `native/upstream.json`, `native/build.sh`,
+`native/toolchain.sh` and `scripts/build-so.sh`, taken from the package root;
+`.gitattributes` keeps these files and both records byte for byte in any
+checkout.  `tests/native.rkt` fails when a shipped platform has no candidate
+or no line in either file, when a file differs from its sha256, or when a
+recorded build-inputs hash is not the current one.  `LICENSE.libsecp256k1` is
+upstream's `COPYING`, the MIT notice the binaries are distributed under.
 
 ## How a candidate is built
 
@@ -49,15 +50,17 @@ in `candidates/<platform>/`, writes its `BUILD-INPUTS` line
 dependencies.  The linux build is reproducible: the same inputs give the same
 bytes, and CI rebuilds it and fails if it differs from the committed file.  It
 must need only `libc.so.6` and no glibc symbol version above 2.17; CI checks
-both and loads it under glibc 2.17.  CI rebuilds the darwin candidate as well
-and, until two macOS builds are known to agree, only warns when the bytes
-differ.
+both and loads it under glibc 2.17.  The darwin build is reproducible apart
+from the linker UUID and the ad-hoc signature: CI rebuilds it and fails when
+`racket scripts/compare-darwin.rkt <committed> <fresh>`, which zeroes the
+`LC_UUID` bytes and the region `LC_CODE_SIGNATURE` names in both, finds a
+difference.
 
-## Updating upstream, the compile line or the toolchain
+## Updating upstream, the compile line, the toolchain or the build script
 
-A change to any of `native/upstream.json`, `native/build.sh` or
-`native/toolchain.sh` rebuilds every candidate; `tests/native.rkt` fails until
-each one's `BUILD-INPUTS` line is current.
+A change to any of `native/upstream.json`, `native/build.sh`,
+`native/toolchain.sh` or `scripts/build-so.sh` rebuilds every candidate;
+`tests/native.rkt` fails until each one's `BUILD-INPUTS` line is current.
 
 1. Edit the input.  For a new release: version, URL, and the sha256 of the
    release tarball (download it and check it against the release); then the

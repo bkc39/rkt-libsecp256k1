@@ -27,6 +27,7 @@ signing).  It is unrelated to the pure-Racket `secp256k1` package.
 | `native/toolchain.sh` | every other build parameter: the manylinux image digest, compilers, macOS deployment target, darwin install name and signing |
 | `scripts/build-so.sh` | builds a portable candidate: `linux` in manylinux2014 (docker), `darwin` on a Mac; records its build inputs |
 | `scripts/record-build-inputs.sh` | writes a candidate's line of `BUILD-INPUTS` |
+| `scripts/compare-darwin.rkt` | compares two darwin builds with their `LC_UUID` and code signature zeroed; CI runs it |
 | `native-libs/candidates/` | the committed prebuilt libraries, `<platform>/libsecp256k1.{so,dylib}`, their `SHA256SUMS` and `BUILD-INPUTS` |
 | `native-libs/LICENSE.libsecp256k1` | upstream's `COPYING`, the MIT notice the binaries ship under |
 | `native-libs/BUILDING.md` | how the candidates are built and updated |
@@ -65,7 +66,8 @@ The gates are in `.racket-dev.rktd`.
 - No upstream C source or header is committed (`tests/native.rkt` checks
   it); the source is the release tarball pinned in `native/upstream.json`.
 - Every shipped library comes from `native/build.sh`.  A change to any build
-  input (`native/upstream.json`, `native/build.sh`, `native/toolchain.sh`)
+  input (`native/upstream.json`, `native/build.sh`, `native/toolchain.sh`,
+  `scripts/build-so.sh`)
   rebuilds and recommits every candidate with its `SHA256SUMS` and
   `BUILD-INPUTS` lines; `tests/native.rkt` fails until each is.
 - No argument value in any printed form, error message, contract violation,
@@ -136,9 +138,9 @@ uploads (`libsecp256k1-darwin`) with its `SHA256SUMS` line, and run
 only one.  `tests/native.rkt` fails while any shipped platform lacks a
 candidate, a `SHA256SUMS` line or a current `BUILD-INPUTS` line.  The linux
 candidate is reproducible and CI fails if a fresh build differs from it; it
-needs only `libc.so.6` and glibc 2.17.  CI rebuilds the darwin candidate too
-and warns, without failing, when the bytes differ, as two macOS builds are not
-yet known to be reproducible.  The macOS CI lane installs the committed
+needs only `libc.so.6` and glibc 2.17.  The darwin candidate is reproducible
+apart from the linker UUID and the ad-hoc signature; CI enforces it with
+`scripts/compare-darwin.rkt`.  The macOS CI lane installs the committed
 candidate.  `nix flake check` on x86_64-linux also installs and tests the
 committed linux candidate (the `candidate` check).
 
@@ -149,7 +151,10 @@ committed linux candidate (the `candidate` check).
 `tests/load.rkt` run when `LIBSECP256K1_TEST_SYSTEM_LIB` names a system
 libsecp256k1.  Each prints a `SKIPPED` line otherwise, as does the check
 of a usable `LIBSECP256K1_NATIVE_LIB_PATH` library in `tests/install.rkt` on a
-host with neither a staged library nor a candidate.  The dev shell and
+host with neither a staged library nor a candidate, the check of a loadable
+library that is not libsecp256k1 there without `/proc/self/maps` (off Linux),
+and the line-ending attribute check in `tests/native.rkt` where the package
+is not the root of a git checkout.  The dev shell and
 `nix flake check` set both; the CI Racket lanes set `LIBSECP256K1_CAST`, and
 the system-library tests run in the `nix flake check` lane and the Ubuntu
 stable lane (the distribution's package).

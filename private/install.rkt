@@ -3,10 +3,7 @@
 (require (only-in ffi/unsafe ffi-lib)
          (only-in racket/file make-directory* make-temporary-file)
          (only-in racket/string string-join)
-         (only-in setup/cross-system
-                  cross-installation?
-                  cross-system-library-subpath
-                  cross-system-type)
+         (only-in setup/cross-system cross-system-library-subpath cross-system-type)
          "locate.rkt")
 
 (provide pre-installer
@@ -20,7 +17,7 @@
   (bytes->string/utf-8 (cross-system-type 'so-suffix)))
 
 (define (validate-on-host? platform)
-  (and (not (cross-installation?)) (equal? platform host-platform)))
+  (equal? platform host-platform))
 
 (define (failure-detail e)
   (define message (exn-message e))

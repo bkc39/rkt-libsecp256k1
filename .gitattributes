@@ -1,3 +1,7 @@
 native-libs/candidates/*/* binary
 native-libs/LICENSE.libsecp256k1 -text
 tests/vectors/** -text
+native/* -text
+scripts/*.sh -text
+native-libs/candidates/SHA256SUMS -text
+native-libs/candidates/BUILD-INPUTS -text
