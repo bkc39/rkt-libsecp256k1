@@ -63,7 +63,7 @@ The gates are in `.racket-dev.rktd`.
 ## Rules
 
 - Every public binding has a contract in `main.rkt`, an entry in
-  `scribblings/libsecp256k1.scrbl` and a test.  API documentation lives in
+  `scribblings/reference.scrbl` and a test.  API documentation lives in
   the manual, not in comments.
 - The manual is terse and shows Racket only.  It never mentions Nix.
 - No upstream C source or header is committed (`tests/native.rkt` checks
