@@ -13,18 +13,6 @@
            "helpers/util.rkt"
            "helpers/vectors.rkt")
 
-  (define racket-path
-    (let ([exe (find-system-path 'exec-file)])
-      (if (absolute-path? exe) exe (find-executable-path exe))))
-
-  (define (environment-with settings)
-    (define env (environment-variables-copy (current-environment-variables)))
-    (for ([s (in-list settings)])
-      (environment-variables-set! env
-                                  (string->bytes/utf-8 (car s))
-                                  (and (cdr s) (string->bytes/utf-8 (cdr s)))))
-    env)
-
   (define (run-program program settings #:directory [directory (current-directory)])
     (define out
       (parameterize ([current-environment-variables (environment-with settings)]

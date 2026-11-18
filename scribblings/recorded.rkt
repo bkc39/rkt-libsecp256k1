@@ -27,6 +27,7 @@
     (guide-recovery
      [(define rsig (ecdsa-sign-recoverable digest key))]
      [(equal? (ecdsa-recover rsig digest) public) "#t"]
+     [(public-key? (ecdsa-recover rsig (sha256-bytes #"hello!"))) "#t"]
      [(equal? (ecdsa-recover rsig (sha256-bytes #"hello!")) public) "#f"]
      [(ecdsa-verify rsig digest public) "#t"])
     (guide-encodings

@@ -1,13 +1,16 @@
 #lang racket/base
 
 (module+ test
-  (require racket/list
+  (require (only-in racket/file delete-directory/files file->string make-temporary-directory)
+           racket/list
            racket/match
            racket/port
            racket/runtime-path
            racket/string
+           (only-in racket/system process*/ports)
            rackunit
            libsecp256k1
+           (only-in "helpers/util.rkt" environment-with racket-path)
            "../scribblings/recorded.rkt")
 
   (define-runtime-path readme "../README.md")
@@ -59,9 +62,44 @@
   (define ns (example-namespace))
 
   (for ([section (in-list (syntax->datum manual-examples))])
-    (for ([r (in-list (map row->recorded (cdr section)))])
-      (test-case (format "manual, ~a: ~s prints its recorded result" (car section) (recorded-form r))
+    (match-define (cons name rows) section)
+    (for ([r (in-list (map row->recorded rows))])
+      (test-case (format "manual, ~a: ~s prints its recorded result" name (recorded-form r))
         (check-equal? (outcome ns (recorded-form r)) (recorded-expected r)))))
+
+  (define-runtime-path manual "../scribblings/libsecp256k1.scrbl")
+
+  (define (build-manual dest settings)
+    (define err (open-output-string))
+    (match-define (list _ _ _ _ control)
+      (parameterize ([current-environment-variables (environment-with settings)])
+        (process*/ports (open-output-nowhere) (open-input-bytes #"") err
+                        racket-path "-l-" "raco" "scribble" "--html"
+                        "--dest" (path->string dest) (path->string manual))))
+    (define finished (sync/timeout 90 (thread (lambda () (control 'wait)))))
+    (cond
+      [finished (values (control 'exit-code) (get-output-string err))]
+      [else (control 'kill) (values 'timeout (get-output-string err))]))
+
+  (define (manual-text settings)
+    (define dest (make-temporary-directory))
+    (define-values (status err) (build-manual dest settings))
+    (define html (build-path dest "libsecp256k1.html"))
+    (define text
+      (and (file-exists? html)
+           (string-normalize-spaces (regexp-replace* #rx"<[^>]*>" (file->string html) " "))))
+    (delete-directory/files dest)
+    (values status err text))
+
+  (test-case "the manual builds without a C library and shows the text it shows with one"
+    (define-values (live-status live-err live) (manual-text '()))
+    (define-values (offline-status offline-err offline)
+      (manual-text (list (cons "LIBSECP256K1_LIBRARY" "/nonexistent/libsecp256k1.so"))))
+    (check-equal? live-status 0 live-err)
+    (check-equal? offline-status 0 offline-err)
+    (check-regexp-match #rx"#&lt;secret-key&gt;" offline)
+    (check-regexp-match #rx"the value is zero or not less than the curve order" offline)
+    (check-equal? offline live))
 
   (define readme-example
     (match (regexp-match #rx"```racket\n(.*?)```" (call-with-input-file readme port->string))

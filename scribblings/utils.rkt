@@ -37,22 +37,22 @@
              #:with recorded #'(eval:alts form (eval:result "" "" message)))
     (pattern [form result:printed]
              #:with live #'form
-             #:with recorded #'(eval:alts form (eval:result (racketresultfont result.text))))))
+             #:with recorded #'(eval:alts form (eval:result (racketresultfont result.text)))))
+
+  (define (recorded-rows stx key)
+    (syntax-parse (replace-context stx manual-examples)
+      [((name:id row ...) ...)
+       (for/first ([name (in-list (attribute name))]
+                   [rows (in-list (attribute row))]
+                   #:when (eq? (syntax-e name) (syntax-e key)))
+         rows)])))
 
 (define-syntax (recorded-examples stx)
   (syntax-parse stx
     [(_ key:id)
-     (syntax-parse (replace-context stx manual-examples)
-       [((name:id row:recorded-row ...) ...)
-        (define rows
-          (for/first ([name (in-list (syntax->list #'(name ...)))]
-                      [rows (in-list (syntax->list #'((row ...) ...)))]
-                      #:when (eq? (syntax-e name) (syntax-e #'key)))
-            rows))
-        (unless rows
-          (raise-syntax-error #f "no recorded examples with this name" stx #'key))
-        (syntax-parse rows
-          [(row:recorded-row ...)
-           #'(if live?
-                 (examples #:eval secp-eval row.live ...)
-                 (examples #:eval secp-eval row.recorded ...))])])]))
+     #:do [(define rows (recorded-rows stx #'key))]
+     #:fail-unless rows "no recorded examples with this name"
+     #:with (row:recorded-row ...) rows
+     #'(if live?
+           (examples #:eval secp-eval row.live ...)
+           (examples #:eval secp-eval row.recorded ...))]))

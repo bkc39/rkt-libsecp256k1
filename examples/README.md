@@ -1,8 +1,8 @@
 # Examples
 
 One program per section of the manual's guide (`raco docs libsecp256k1`).
-Run one with `racket examples/01-sign-verify.rkt`; `raco test examples`
-runs their tests.
+Run one with `racket examples/01-sign-verify.rkt`; its tests are
+`tests/examples/` under the same name.
 
 | program | guide section |
 |---|---|

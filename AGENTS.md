@@ -32,7 +32,8 @@ signing).  It is unrelated to the pure-Racket `secp256k1` package.
 | `native-libs/LICENSE.libsecp256k1` | upstream's `COPYING`, the MIT notice the binaries ship under |
 | `native-libs/BUILDING.md` | how the candidates are built and updated |
 | `native-libs/libsecp256k1.*` | the staged library the loader opens, git-ignored |
-| `examples/` | numbered programs (`NN-topic.rkt`), one per guide section, each with a `main` and a `test` submodule |
+| `examples/` | numbered programs (`NN-topic.rkt`), one per guide section: helpers, a `run` taking a key, and a `main` submodule |
+| `tests/examples/` | one test file per example, under the example's name |
 | `scribblings/guide.scrbl` | the guide: one section per example program |
 | `scribblings/reference.scrbl` | the reference: every public binding |
 | `scribblings/recorded.rkt` | the manual's examples with their recorded results |
@@ -96,10 +97,13 @@ The gates are in `.racket-dev.rktd`.
   after a thread swap would return to a stale foreign context.
 - Every user-visible feature has a guide section and an example program.
   A new example takes the next number and a row in `examples/README.md`.
-  Examples are plain programs on the public API: a `main` submodule prints
-  a few results, a `test` submodule pins them; narration belongs in the
-  guide, not in comments.  `tests/examples.rkt` runs every `main` and
-  checks that it prints no secret key.
+  Examples are plain programs on the public API and hold only the program:
+  they provide their helpers and a `run` that prints a few results for a
+  key, which `main` calls with a generated one.  Their tests are
+  `tests/examples/NN-topic.rkt`, which pin `run`'s output for a fixed key;
+  narration belongs in the guide, not in comments.  `tests/examples.rkt`
+  checks that every example has its test file and no `test` submodule,
+  that `run` prints no form of the key it is given, and runs every `main`.
 - Manual examples live in `scribblings/recorded.rkt` with their printed
   results, in the order the manual shows them, so the manual builds without
   a usable C library; `tests/docs.rkt` checks every recorded result against

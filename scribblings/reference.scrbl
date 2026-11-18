@@ -151,6 +151,9 @@ Add @racket[tweak], read as a big-endian integer, to the key: @italic{k + t} and
 @italic{P + tG} respectively.  Raise @racket[exn:fail:libsecp256k1:key] when the tweak is not
 less than the order or the result is zero or the point at infinity.
 
+A tweak derived only from public data gives the parent's secret key away to whoever holds a
+child's secret key and that data: the parent's key is the child's minus the tweak.
+
 @recorded-examples[tweaks]}
 
 @section{Errors}
@@ -187,10 +190,11 @@ it; installing for the running platform refuses that file, with a message, when 
 load or lacks a function this library calls.  @racket['system] means the operating system's
 @tt{libsecp256k1} (0.2 or later, with the recovery module), used where no bundled copy loads;
 @racket['environment] means the file named by the @tt{LIBSECP256K1_LIBRARY} environment
-variable: that file and no other, with a relative path taken from the current directory.  If that variable is
-@tt{system}, only the system library is used.  The system library is found by the operating
-system's loader in its own directories (on macOS, also @filepath{/opt/homebrew/lib} unless
-@tt{DYLD_FALLBACK_LIBRARY_PATH} is set), never in the current directory.  Raises
+variable: that file and no other, with a relative path taken from the current directory.  If
+that variable is @tt{system}, only the system library is used.  The system library is found
+by the operating system's loader in its own directories (on macOS, also
+@filepath{/opt/homebrew/lib} unless @tt{DYLD_FALLBACK_LIBRARY_PATH} is set), never in the
+current directory.  Raises
 @racket[exn:fail:libsecp256k1:load] when none can be loaded; every other procedure that needs
 the C library raises it too.}
 

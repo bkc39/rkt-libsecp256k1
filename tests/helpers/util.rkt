@@ -11,6 +11,8 @@
 (provide bytes->integer
          check-blames-here
          edge-integers
+         environment-with
+         example-key-integer
          field-prime
          half-order
          hex
@@ -18,6 +20,8 @@
          n
          non-residue-x
          quadratic-residue?
+         raised?
+         racket-path
          random-bytes
          random-digest
          random-secret-bytes
@@ -29,6 +33,9 @@
 (define n secp256k1-order)
 (define half-order (quotient (- n 1) 2))
 (define field-prime #xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F)
+
+(define example-key-integer
+  #xaf7f91569049b1ae97b7e3b7a6ec06d9f0ad4ac78822f237c7af387ebe486986)
 
 (define edge-integers
   (list 1 2 (- n 1) (- n 2) (expt 2 128) (expt 2 255) half-order (quotient (+ n 1) 2)))
@@ -87,6 +94,21 @@
     (define rng (seeded seed ...))
     (with-check-info (['random-seed (list seed ...)])
       body ...)))
+
+(define racket-path
+  (let ([exe (find-system-path 'exec-file)])
+    (if (absolute-path? exe) exe (find-executable-path exe))))
+
+(define (environment-with settings)
+  (define env (environment-variables-copy (current-environment-variables)))
+  (for ([s (in-list settings)])
+    (environment-variables-set! env
+                                (string->bytes/utf-8 (car s))
+                                (and (cdr s) (string->bytes/utf-8 (cdr s)))))
+  env)
+
+(define ((raised? predicate pattern) e)
+  (and (predicate e) (regexp-match? pattern (exn-message e))))
 
 (define (blames? file-name e)
   (and (exn:fail:contract:blame? e)

@@ -1,65 +1,96 @@
 #lang racket/base
 
 (module+ test
-  (require file/sha1
-           racket/list
-           racket/port
+  (require (only-in file/sha1 bytes->hex-string)
+           (only-in racket/list range)
+           (only-in racket/port with-output-to-bytes with-output-to-string)
            racket/runtime-path
+           (only-in racket/string string-contains? string-split)
            rackunit
-           libsecp256k1)
+           libsecp256k1
+           (only-in "helpers/util.rkt" example-key-integer integer->bytes32))
 
   (define-runtime-path examples-dir "../examples")
+  (define-runtime-path example-tests-dir "examples")
 
   (define (example-number name)
-    (string->number (cadr (regexp-match #px"^([0-9]{2})-" name))))
+    (string->number (substring name 0 2)))
 
-  (define example-names
-    (sort (for/list ([p (in-list (directory-list examples-dir))]
+  (define (example-names dir)
+    (sort (for/list ([p (in-list (directory-list dir))]
                      #:when (regexp-match? #px"^[0-9]{2}-.*[.]rkt$" (path->string p)))
             (path->string p))
           string<?))
 
-  (define (example-submodule name submodule)
-    `(submod (file ,(path->string (build-path examples-dir name))) ,submodule))
+  (define examples (example-names examples-dir))
+
+  (define (example-path name)
+    `(file ,(path->string (build-path examples-dir name))))
 
   (define (run-main name)
     (with-output-to-string
       (lambda ()
         (parameterize ([current-namespace (make-base-namespace)])
-          (dynamic-require (example-submodule name 'main) #f)))))
+          (dynamic-require `(submod ,(example-path name) main) #f)))))
 
-  (define (public-key-hex-of window)
-    (define k (string->number window 16))
-    (and (< 0 k secp256k1-order)
-         (bytes->hex-string (public-key->bytes (secret-key->public-key (integer->secret-key k))))))
+  (define (run-with-example-key name)
+    (with-output-to-bytes
+      (lambda ()
+        ((dynamic-require (example-path name) 'run) (integer->secret-key example-key-integer)))))
 
-  (define (printed-secret-keys out)
-    (define hex-runs (regexp-match* #px"[0-9a-fA-F]{64,}" out))
-    (define x-coordinates (map (lambda (pk) (substring pk 2))
-                               (regexp-match* #px"0[23][0-9a-f]{64}" out)))
-    (for*/list ([run (in-list hex-runs)]
-                [i (in-range (- (string-length run) 63))]
-                [window (in-value (string-downcase (substring run i (+ i 64))))]
-                [pk (in-value (public-key-hex-of window))]
-                #:when (and pk (member (substring pk 2) x-coordinates)))
-      window))
+  (define (secret-key-forms v)
+    (define bs (integer->bytes32 v))
+    (list (bytes->hex-string bs) (number->string v) (format "~s" bs) (bytes->string/latin-1 bs)))
+
+  (define (leaked-forms v out)
+    (define text (string-downcase (bytes->string/latin-1 out)))
+    (for/list ([form (in-list (secret-key-forms v))]
+               #:when (string-contains? text (string-downcase form)))
+      form))
+
+  (define example-hex (bytes->hex-string (integer->bytes32 example-key-integer)))
 
   (test-case "examples are numbered 00, 01, ... without gaps"
-    (check-equal? (map example-number example-names)
-                  (range (length example-names)))
-    (check-true (>= (length example-names) 5)))
+    (check-equal? (map example-number examples) (range (length examples)))
+    (check-true (>= (length examples) 5)))
 
-  (test-case "the secret-key scan finds a secret key printed beside its public key"
-    (define key (integer->secret-key 5))
-    (define out (format "~a ~a"
-                        (bytes->hex-string (secret-key->bytes key))
-                        (bytes->hex-string (public-key->bytes (secret-key->public-key key)))))
-    (check-equal? (printed-secret-keys out) (list (bytes->hex-string (secret-key->bytes key)))))
+  (test-case "every example has its test file, and every test file its example"
+    (check-equal? (example-names example-tests-dir) examples))
 
-  (for ([name (in-list example-names)])
-    (test-case (format "~a has a test submodule" name)
-      (check-true (module-declared? (example-submodule name 'test) #t)))
-    (test-case (format "~a's main prints public keys and no secret key" name)
-      (define out (run-main name))
-      (check-regexp-match #px"0[23][0-9a-f]{64}" out)
-      (check-equal? (printed-secret-keys out) '()))))
+  (test-case "the leak scan finds a secret key's hex in any case, run into other hex"
+    (check-equal? (leaked-forms example-key-integer
+                                (string->bytes/latin-1
+                                 (string-append "04" (string-upcase example-hex) "ab")))
+                  (list example-hex)))
+
+  (test-case "the leak scan finds a secret key printed in decimal"
+    (check-equal? (leaked-forms example-key-integer
+                                (string->bytes/latin-1 (format "key=~a." example-key-integer)))
+                  (list (number->string example-key-integer))))
+
+  (test-case "the leak scan finds a secret key's bytes, written or displayed"
+    (define bs (integer->bytes32 example-key-integer))
+    (check-equal? (leaked-forms example-key-integer (string->bytes/latin-1 (format "(~s)" bs)))
+                  (list (format "~s" bs)))
+    (check-equal? (leaked-forms example-key-integer (bytes-append #"\n" bs #"\n"))
+                  (list (bytes->string/latin-1 bs))))
+
+  (test-case "the leak scan passes a public key, a signature and another key"
+    (define key (integer->secret-key example-key-integer))
+    (define out
+      (bytes-append (public-key->bytes (secret-key->public-key key) #:compressed? #f)
+                    (ecdsa-signature->compact (ecdsa-sign (make-bytes 32 7) key))
+                    (string->bytes/latin-1
+                     (format "~a ~a" (- example-key-integer 1)
+                             (bytes->hex-string (integer->bytes32 (+ example-key-integer 1)))))))
+    (check-equal? (leaked-forms example-key-integer out) '()))
+
+  (for ([name (in-list examples)])
+    (test-case (format "~a holds only its program: no test submodule" name)
+      (check-false (module-declared? `(submod ,(example-path name) test) #t)))
+    (test-case (format "~a's run prints no form of the secret key it is given" name)
+      (check-equal? (leaked-forms example-key-integer (run-with-example-key name)) '()))
+    (test-case (format "~a's main runs and prints as many lines as run" name)
+      (check-equal? (length (string-split (run-main name) "\n"))
+                    (length (string-split (bytes->string/latin-1 (run-with-example-key name))
+                                          "\n"))))))
