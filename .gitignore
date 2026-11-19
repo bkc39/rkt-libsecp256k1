@@ -1,0 +1,23 @@
+# Racket build directories
+compiled/
+doc/
+*.zo
+*.zo~
+
+# Emacs backup and auto-save files
+*~
+\#*\#
+.\#*
+
+# Nix and direnv
+result
+result-*
+.direnv/
+
+.DS_Store
+
+# The library the pre-installer stages from native-libs/candidates/
+/native-libs/libsecp256k1.*
+
+# A copy the pre-installer has not yet renamed into place
+/native-libs/libsecp256k1-*.partial
