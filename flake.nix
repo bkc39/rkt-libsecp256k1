@@ -12,7 +12,7 @@
         "aarch64-darwin"
       ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
-      version = "0.1";
+      version = "0.1.1";
       upstream = builtins.fromJSON (builtins.readFile ./native/upstream.json);
       so = pkgs: pkgs.stdenv.hostPlatform.extensions.sharedLibrary;
       libFile = pkgs: "libsecp256k1${so pkgs}";

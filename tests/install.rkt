@@ -59,6 +59,14 @@
       (check-equal? (staged root "libsecp256k1.so") "linux candidate")
       (check-false (staged root "libsecp256k1.dylib"))))
 
+  (test-case "a natipkg build of Racket stages its platform's candidate, silently"
+    (with-temporary-directory root
+      (make-root! root)
+      (define run (stage root #:platform "x86_64-linux-natipkg"))
+      (check-eq? (staging-result run) 'candidate)
+      (check-equal? (staging-output run) "")
+      (check-equal? (staged root "libsecp256k1.so") "linux candidate")))
+
   (test-case "on Apple-silicon macOS the darwin candidate is staged"
     (with-temporary-directory root
       (make-root! root)

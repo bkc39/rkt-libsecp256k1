@@ -6,7 +6,7 @@
 (define pkg-desc
   (string-append "FFI bindings to Bitcoin Core's libsecp256k1: secp256k1 keys and ECDSA "
                  "signatures with public key recovery"))
-(define version "0.1")
+(define version "0.1.1")
 (define pkg-authors '(bkc))
 (define license '((Apache-2.0 OR MIT) AND MIT))
 (define pre-install-collection "private/install.rkt")

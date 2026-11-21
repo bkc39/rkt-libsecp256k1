@@ -64,8 +64,9 @@
   '(("x86_64-linux" "linux" "libsecp256k1.so")
     ("aarch64-macosx" "darwin" "libsecp256k1.dylib")))
 
+;; A natipkg build of Racket, the package build server's, runs its platform's libraries.
 (define (bundled-platform platform)
-  (assoc platform bundled-platforms))
+  (assoc (regexp-replace #rx"-natipkg$" platform "") bundled-platforms))
 
 (define required-symbols
   '("secp256k1_context_create"
