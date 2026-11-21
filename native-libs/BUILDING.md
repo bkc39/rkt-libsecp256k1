@@ -9,6 +9,9 @@ directory, where the loader (`private/locate.rkt`) finds it:
 | `x86_64-linux` | `candidates/linux/libsecp256k1.so` |
 | `aarch64-macosx` | `candidates/darwin/libsecp256k1.dylib` |
 
+A `-natipkg` build of Racket (`x86_64-linux-natipkg`, which the package build
+server runs) uses its platform's file.
+
 Every other platform, `aarch64-linux`, `x86_64-macosx` and Windows among them,
 gets no bundled library and uses a system libsecp256k1 or the file named by
 `LIBSECP256K1_LIBRARY`.  When `LIBSECP256K1_NATIVE_LIB_PATH` names a directory

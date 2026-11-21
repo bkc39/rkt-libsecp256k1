@@ -167,6 +167,10 @@
     (check-regexp-match #rx"\n  run raco setup libsecp256k1, set LIBSECP256K1_LIBRARY[^\n]*$"
                         message))
 
+  (test-case "a natipkg build of Racket is its platform: a missing library asks for raco setup"
+    (check-regexp-match #rx"\n  run raco setup libsecp256k1, "
+                        (missing-bundled-message "x86_64-linux-natipkg")))
+
   (test-case "on a platform without a bundled library the error names the platforms that ship one"
     (define message (missing-bundled-message "riscv64-linux"))
     (check-regexp-match (string-append "\n  bundled: none for riscv64-linux"

@@ -118,7 +118,8 @@ The pre-installer (`private/install.rkt`) copies a library into
 `native-libs/`: the one under `LIBSECP256K1_NATIVE_LIB_PATH/lib/` when that is
 set (Nix) and, when installing for the host's own platform, it loads and has
 `required-symbols`; else the committed candidate for the platform
-(`bundled-platforms`: `x86_64-linux`, `aarch64-macosx`); else it keeps a
+(`bundled-platforms`: `x86_64-linux`, `aarch64-macosx`; a `-natipkg` build of
+Racket, the package build server's, counts as its platform); else it keeps a
 library already staged.  The platform and file suffix are the target's
 (`setup/cross-system`), so `raco cross` stages the target's library.  With no
 library it prints what to do, and a failed copy prints the paths and the system
